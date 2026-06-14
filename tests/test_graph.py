@@ -89,10 +89,13 @@ class TestStateShape:
         assert isinstance(result["messages"], list)
 
     def test_optional_fields_are_none(self):
-        """Fields not set by intake remain None."""
+        """Fields not set by Phase 3+ remain None; planner is stubbed by conftest."""
         result = _run_graph()
-        assert result["plan"] is None
+        # plan is now populated by the planner node (Phase 2)
+        assert result["plan"] is not None
+        # these are still None — set by Phase 3+
         assert result["current_modality"] is None
+        assert result["grades"] is None
         assert result["grades"] is None
 
 

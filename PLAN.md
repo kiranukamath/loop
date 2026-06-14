@@ -16,7 +16,7 @@ completes.
 |------:|-------|-------------------|--------|-------------------|
 | 0 | Foundation | setup / model seam / observability | ✅ done & approved | pending |
 | 1 | State & minimal graph | LangGraph mental model | ✅ done & approved | pending |
-| 2 | Planning | structured output, planning | ⬜ not started | — |
+| 2 | Planning | structured output, planning | ✅ done & approved | pending |
 | 3 | Interview loop & orchestration | orchestration, sub-agents | ⬜ not started | — |
 | 4 | Memory | short- + long-term memory | ⬜ not started | — |
 | 5 | HITL | interrupts & resume | ⬜ not started | — |
@@ -24,7 +24,7 @@ completes.
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** Phase 2 — awaiting owner approval of Phase 1.
+**Current phase:** Phase 3 — awaiting owner approval of Phase 2.
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -305,6 +305,23 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 2 — 2026-06-13
+**Built:** `loop/schemas.py` (PrepPlan, Session, Grade, Feedback); `loop/nodes/planner.py`
+(ChatPromptTemplate + with_structured_output chain); `graph.py` updated to intake → planner
+→ END; `tests/test_planner.py` (8 tests); `tests/conftest.py` (autouse stub_planner fixture
+so graph tests stay offline). 28/28 tests, 0.40s.
+
+**Key decisions:**
+- `RunnableLambda` required instead of bare `MagicMock` for stubs — LangChain's pipe `|`
+  wraps non-Runnables as callables, so `.invoke()` never fires on a plain mock.
+- `conftest.py` `autouse` fixture stubs the planner for all `test_graph.py` tests, keeping
+  them offline; `test_planner.py` manages its own patching and is excluded by filename check.
+- Weak-areas captured via closure on `RunnableLambda` — post-prompt messages, not raw dict.
+- `plan` stored as `model_dump()` dict in state (not a Pydantic instance) — JSON-serialisable
+  and safe to pass through LangGraph state.
+
+---
 
 ### Phase 1 — 2026-06-13
 **Built:** `loop/state.py` (LoopState + initial_state); `loop/graph.py` (StateGraph: intake →
