@@ -15,7 +15,7 @@ completes.
 | Phase | Title | Capability taught | Status | Approved by owner |
 |------:|-------|-------------------|--------|-------------------|
 | 0 | Foundation | setup / model seam / observability | ✅ done & approved | pending |
-| 1 | State & minimal graph | LangGraph mental model | ⬜ not started | — |
+| 1 | State & minimal graph | LangGraph mental model | ✅ done & approved | pending |
 | 2 | Planning | structured output, planning | ⬜ not started | — |
 | 3 | Interview loop & orchestration | orchestration, sub-agents | ⬜ not started | — |
 | 4 | Memory | short- + long-term memory | ⬜ not started | — |
@@ -24,7 +24,7 @@ completes.
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** Phase 1 — awaiting owner approval of Phase 0.
+**Current phase:** Phase 2 — awaiting owner approval of Phase 1.
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -305,6 +305,20 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 1 — 2026-06-13
+**Built:** `loop/state.py` (LoopState + initial_state); `loop/graph.py` (StateGraph: intake →
+END, build_graph, compile_graph, main runner); `tests/test_graph.py` (9 tests — structure,
+intake node, state shape, reducer behaviour). 20/20 tests passing.
+
+**Key decisions:**
+- LoopState extends `dict` (not TypedDict) for Python 3.14 + LangGraph compatibility.
+- `messages` uses `Annotated[list[BaseMessage], add_messages]` reducer — append, not overwrite.
+- All phase 2–5 fields declared as `Optional` now so state schema is stable across phases.
+- `build_graph()` / `compile_graph()` split: tests call `compile_graph()` fresh each time;
+  module-level `compiled` singleton used by the runner.
+
+---
 
 ### Phase 0 — 2026-06-13
 **Built:** uv project (Python 3.14, hatchling flat layout); `pyproject.toml` with all runtime
