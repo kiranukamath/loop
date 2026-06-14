@@ -18,6 +18,8 @@ and the callbacks list is empty — tracing is completely skipped.
 
 from __future__ import annotations
 
+import os
+
 from langchain_core.callbacks import BaseCallbackHandler
 
 from loop.config import settings
@@ -29,16 +31,23 @@ def get_langfuse_callback() -> BaseCallbackHandler | None:
     Returns None when public or secret key is absent, so callers can use
     `callbacks=[cb] if cb else []` without any conditional logic.
 
-    Requires all three: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST.
-    Tracing is silently skipped when any of the first two are missing.
+    Why no-args CallbackHandler():
+    Langfuse's SDK calls get_client() internally, which only creates a real
+    (enabled) client when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are present
+    in os.environ.  Passing public_key= to the constructor bypasses that path
+    and returns a disabled client that drops all traces.
+    load_dotenv() in config.py already populated os.environ from .env, so
+    CallbackHandler() with no args finds the credentials and creates a live client.
     """
     if not settings.langfuse_public_key or not settings.langfuse_secret_key:
         return None
 
     from langfuse.langchain import CallbackHandler
 
-    # v4 CallbackHandler only accepts public_key in its constructor.
-    # It reads LANGFUSE_SECRET_KEY and LANGFUSE_HOST from os.environ automatically.
-    # load_dotenv() in config.py already put the .env values into os.environ,
-    # so the handler picks them up without any extra wiring.
-    return CallbackHandler(public_key=settings.langfuse_public_key)
+    # No args — SDK reads LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
+    # from os.environ (set by load_dotenv() at startup).
+    os.environ["LANGFUSE_PUBLIC_KEY"] = settings.langfuse_public_key
+    os.environ["LANGFUSE_SECRET_KEY"] = settings.langfuse_secret_key
+    if settings.langfuse_host:
+        os.environ["LANGFUSE_HOST"] = settings.langfuse_host
+    return CallbackHandler()
