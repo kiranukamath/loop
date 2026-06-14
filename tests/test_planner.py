@@ -226,6 +226,11 @@ class TestGraphWithPlanner:
 
         importlib.reload(graph_mod)
 
+        # After reload, grader/coach are real functions again — stub them in the
+        # reloaded module's namespace so the full graph can run without answers.
+        monkeypatch.setattr(graph_mod, "grader", lambda state: {"grades": []})
+        monkeypatch.setattr(graph_mod, "coach", lambda state: {"weak_areas": []})
+
         from loop.state import initial_state
 
         result = graph_mod.compile_graph().invoke(initial_state())

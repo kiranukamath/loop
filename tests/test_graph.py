@@ -14,7 +14,10 @@ import pathlib
 
 
 def _run_graph() -> dict:
-    """Compile and invoke the graph with a clean initial state."""
+    """Compile and invoke the graph with a clean initial state.
+
+    grader and coach are stubbed by conftest, so no canned answers are needed.
+    """
     from loop.graph import compile_graph
     from loop.state import initial_state
 
@@ -33,12 +36,22 @@ class TestGraphStructure:
         g = compile_graph()
         assert g is not None
 
-    def test_graph_has_intake_node(self):
-        """intake node is registered in the graph."""
+    def test_graph_has_all_nodes(self):
+        """All Phase 3 nodes are registered in the graph."""
         from loop.graph import build_graph
 
         g = build_graph()
-        assert "intake" in g.nodes
+        for name in (
+            "intake",
+            "planner",
+            "session_router",
+            "coding_interviewer",
+            "sd_interviewer",
+            "beh_interviewer",
+            "grader",
+            "coach",
+        ):
+            assert name in g.nodes, f"Missing node: {name}"
 
 
 class TestIntakeNode:
@@ -88,15 +101,15 @@ class TestStateShape:
         result = _run_graph()
         assert isinstance(result["messages"], list)
 
-    def test_optional_fields_are_none(self):
-        """Fields not set by Phase 3+ remain None; planner is stubbed by conftest."""
+    def test_phase3_fields_populated(self):
+        """Phase 3 nodes set current_modality, grades, and weak_areas."""
         result = _run_graph()
-        # plan is now populated by the planner node (Phase 2)
         assert result["plan"] is not None
-        # these are still None — set by Phase 3+
-        assert result["current_modality"] is None
-        assert result["grades"] is None
-        assert result["grades"] is None
+        # Phase 3 routing + grader + coach now run
+        assert result["current_modality"] == "coding"
+        assert result["grades"] is not None
+        assert len(result["grades"]) == 1
+        assert result["weak_areas"] is not None
 
 
 class TestMessagesReducer:

@@ -17,14 +17,14 @@ completes.
 | 0 | Foundation | setup / model seam / observability | ✅ done & approved | pending |
 | 1 | State & minimal graph | LangGraph mental model | ✅ done & approved | pending |
 | 2 | Planning | structured output, planning | ✅ done & approved | pending |
-| 3 | Interview loop & orchestration | orchestration, sub-agents | ⬜ not started | — |
+| 3 | Interview loop & orchestration | orchestration, sub-agents | ✅ done & approved | — |
 | 4 | Memory | short- + long-term memory | ⬜ not started | — |
 | 5 | HITL | interrupts & resume | ⬜ not started | — |
 | 6 | Eval & observability | agent evaluation | ⬜ not started | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** Phase 3 — awaiting owner approval of Phase 2.
+**Current phase:** Phase 4 — awaiting owner approval of Phase 3.
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -305,6 +305,29 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 3 — 2026-06-14
+**Built:** `loop/tools.py` (get_questions_by_modality, get_question_by_id, get_rubric — v2-stable DAO pattern);
+`loop/nodes/interviewers.py` (coding_interviewer, sd_interviewer, beh_interviewer — shared _ask_question helper);
+`loop/nodes/grader.py` (grades answer against rubric via with_structured_output(Grade));
+`loop/nodes/coach.py` (synthesizes grades into Feedback, updates weak_areas);
+`loop/schemas.py` updated (Answer model added); `loop/graph.py` updated (8-node graph with conditional routing);
+`tests/test_phase3.py` (27 new tests); conftest + test_graph + test_planner updated.
+55/55 tests, 0.31s.
+
+**Key decisions:**
+- Conditional edges: `add_conditional_edges("session_router", _route_by_modality, path_map={...})`.
+  The routing function is just `(state) -> str` — like a switch statement expressed as graph topology.
+- Stub strategy: conftest patches `loop.graph.grader` / `loop.graph.coach` (node function names
+  in graph.py's namespace), not just the models. After `compile_graph()` re-runs each test, it picks
+  up the stubbed lambdas. Patching just the model is insufficient because the grader raises before
+  reaching the model when answers are missing.
+- `importlib.reload(graph_mod)` in test_planner wipes conftest patches — that test stubs grader/coach
+  via `monkeypatch.setattr(graph_mod, "grader", ...)` after the reload.
+- Phase 3 answers are pre-injected into state["answers"]. Phase 5 will replace this with a real
+  human interrupt.
+
+---
 
 ### Phase 2 — 2026-06-13
 **Built:** `loop/schemas.py` (PrepPlan, Session, Grade, Feedback); `loop/nodes/planner.py`

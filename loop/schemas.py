@@ -61,7 +61,18 @@ class PrepPlan(BaseModel):
     )
 
 
-# ── Phase 3: Interview loop (stubs — filled in Phase 3) ──────────────────────
+# ── Phase 3: Interview loop ───────────────────────────────────────────────────
+
+
+class Answer(BaseModel):
+    """A candidate's answer to one interview question.
+
+    Stored as model_dump() dicts in state["answers"].
+    Phase 5 will populate these via human interrupt; Phase 3 pre-injects them.
+    """
+
+    question_id: str = Field(description="ID of the question being answered")
+    text: str = Field(description="The candidate's full answer text")
 
 
 class Grade(BaseModel):
