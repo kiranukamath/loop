@@ -1,0 +1,52 @@
+{
+  "questions": [
+    {
+      "id": "cod-001",
+      "modality": "coding",
+      "topic": "sliding-window",
+      "difficulty": "medium",
+      "title": "Longest substring without repeating characters",
+      "prompt": "Given a string s, find the length of the longest substring without repeating characters.\n\nExample: s = \"abcabcbb\" → 3 (\"abc\")\n\nDiscuss your approach, then write the code."
+    },
+    {
+      "id": "cod-002",
+      "modality": "coding",
+      "topic": "concurrency",
+      "difficulty": "medium",
+      "title": "Thread-safe bounded queue",
+      "prompt": "Implement a thread-safe bounded blocking queue in Java (or Python) with put() and get() methods.\n\nDiscuss the synchronization strategy, potential deadlocks, and how you'd test it."
+    },
+    {
+      "id": "sys-001",
+      "modality": "system_design",
+      "topic": "payments",
+      "difficulty": "hard",
+      "title": "Design a payment processing system",
+      "prompt": "Design a payment processing system that handles 10,000 transactions per second.\n\nRequirements:\n- Idempotent payment submission\n- At-least-once delivery with deduplication\n- Real-time balance checks\n- Audit trail for every state change\n\nWalk through your high-level architecture, data model, and the trickiest consistency challenges."
+    },
+    {
+      "id": "sys-002",
+      "modality": "system_design",
+      "topic": "distributed-cache",
+      "difficulty": "medium",
+      "title": "Design a distributed rate limiter",
+      "prompt": "Design a distributed rate limiter that enforces per-user request limits across a fleet of API servers.\n\nConsider: token bucket vs sliding window, Redis vs in-process, accuracy vs latency tradeoffs."
+    },
+    {
+      "id": "beh-001",
+      "modality": "behavioral",
+      "topic": "conflict",
+      "difficulty": "medium",
+      "title": "Disagreement with a technical decision",
+      "prompt": "Tell me about a time you disagreed with a technical decision made by your team or manager.\n\nWhat was the decision? How did you handle the disagreement? What was the outcome?"
+    },
+    {
+      "id": "beh-002",
+      "modality": "behavioral",
+      "topic": "ownership",
+      "difficulty": "medium",
+      "title": "Taking ownership of a hard problem",
+      "prompt": "Describe a situation where you took ownership of a complex, ambiguous problem that wasn't originally yours to solve.\n\nWhat made it complex? What did you do? What was the result?"
+    }
+  ]
+}

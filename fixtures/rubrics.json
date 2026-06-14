@@ -1,0 +1,165 @@
+{
+  "rubrics": [
+    {
+      "question_id": "cod-001",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "correctness",
+          "weight": 4,
+          "description": "Solution is correct for all cases including edge cases (empty string, all-unique, all-same)."
+        },
+        {
+          "name": "optimal_complexity",
+          "weight": 3,
+          "description": "Achieves O(n) time with a sliding-window / two-pointer approach.  O(n²) brute force scores partial credit."
+        },
+        {
+          "name": "code_quality",
+          "weight": 2,
+          "description": "Clean variable names, no dead code, readable structure."
+        },
+        {
+          "name": "communication",
+          "weight": 1,
+          "description": "Candidate explained the approach before coding and narrated tradeoffs."
+        }
+      ]
+    },
+    {
+      "question_id": "cod-002",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "correctness",
+          "weight": 4,
+          "description": "Blocking semantics are correct: put() blocks when full, get() blocks when empty, no race conditions."
+        },
+        {
+          "name": "synchronization_strategy",
+          "weight": 3,
+          "description": "Chooses an appropriate primitive (ReentrantLock + Conditions, synchronized, or Semaphore) and justifies it."
+        },
+        {
+          "name": "edge_cases",
+          "weight": 2,
+          "description": "Handles spurious wakeups (while loop, not if), interrupt handling, and capacity=1."
+        },
+        {
+          "name": "testability",
+          "weight": 1,
+          "description": "Mentions how to test concurrency: multiple producer/consumer threads, stress test, or deterministic interleaving."
+        }
+      ]
+    },
+    {
+      "question_id": "sys-001",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "idempotency",
+          "weight": 3,
+          "description": "Explains idempotency key pattern: client-generated key, deduplication at ingress, exactly-once semantics."
+        },
+        {
+          "name": "architecture",
+          "weight": 3,
+          "description": "Clear layered design: API gateway → async queue → processor → datastore.  Reasonable component choices."
+        },
+        {
+          "name": "consistency",
+          "weight": 2,
+          "description": "Addresses distributed consistency: outbox pattern or saga, at-least-once + dedup, balance check atomicity."
+        },
+        {
+          "name": "scalability",
+          "weight": 1,
+          "description": "Addresses 10k TPS: partitioning strategy, horizontal scaling, back-pressure."
+        },
+        {
+          "name": "audit_trail",
+          "weight": 1,
+          "description": "Proposes append-only event log or event sourcing for the audit trail."
+        }
+      ]
+    },
+    {
+      "question_id": "sys-002",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "algorithm_choice",
+          "weight": 3,
+          "description": "Compares token bucket vs sliding window log vs fixed window; picks one with justification."
+        },
+        {
+          "name": "distributed_correctness",
+          "weight": 3,
+          "description": "Addresses race conditions across servers: Lua script in Redis for atomicity, or accepts slight inaccuracy."
+        },
+        {
+          "name": "failure_modes",
+          "weight": 2,
+          "description": "What happens when Redis is down? Fail-open vs fail-closed tradeoff explained."
+        },
+        {
+          "name": "communication",
+          "weight": 2,
+          "description": "Structured walk-through: clarifying questions first, requirements, then design."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-001",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "star_structure",
+          "weight": 3,
+          "description": "Answer follows STAR: clear Situation, specific Task, concrete Actions, measurable Result."
+        },
+        {
+          "name": "constructive_approach",
+          "weight": 3,
+          "description": "Shows data-driven or principled pushback — not emotional.  Escalated appropriately if needed."
+        },
+        {
+          "name": "outcome_and_reflection",
+          "weight": 2,
+          "description": "States the actual outcome (even if they lost the argument) and what they learned."
+        },
+        {
+          "name": "conciseness",
+          "weight": 2,
+          "description": "Stays under ~3 minutes.  No excessive background or tangents."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-002",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "star_structure",
+          "weight": 3,
+          "description": "Clear STAR format with a genuinely complex or ambiguous situation."
+        },
+        {
+          "name": "ownership_evidence",
+          "weight": 3,
+          "description": "Shows proactive initiative: they didn't wait to be asked; they drove the resolution."
+        },
+        {
+          "name": "impact",
+          "weight": 2,
+          "description": "Quantifies or concretely describes the positive outcome (team, users, business)."
+        },
+        {
+          "name": "conciseness",
+          "weight": 2,
+          "description": "Crisp storytelling — sets up the situation quickly, focuses on their actions."
+        }
+      ]
+    }
+  ]
+}
