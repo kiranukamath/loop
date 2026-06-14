@@ -150,9 +150,10 @@ class TestObservability:
         assert get_langfuse_callback() is None
 
     def test_returns_handler_when_configured(self, monkeypatch):
-        """LANGFUSE_PUBLIC_KEY set → returns a CallbackHandler instance."""
+        """Public + secret key set → returns a CallbackHandler instance."""
         monkeypatch.setenv("BEDROCK_API_KEY", "test-key")
         monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test-abc123")
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test-xyz789")
 
         import loop.config as cfg_mod
 

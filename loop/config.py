@@ -28,8 +28,12 @@ class Settings(BaseSettings):
     # Haiku 4.5 is the cheapest current Claude model on Bedrock.
     bedrock_model_id: str = "anthropic.claude-haiku-4-5-20251001-v1:0"
 
-    # ── Langfuse (optional — no-op when absent) ──────────────────────────────
+    # ── Langfuse (optional — no-op when all three are absent/empty) ─────────
+    # All three are required for a self-hosted instance.
+    # Leave all empty to disable tracing entirely.
     langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "http://localhost:3000"
 
     # ── Model provider switch (v2 seam) ─────────────────────────────────────
     # "bedrock" is the only implemented provider in v1.

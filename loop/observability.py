@@ -26,16 +26,19 @@ from loop.config import settings
 def get_langfuse_callback() -> BaseCallbackHandler | None:
     """Return a Langfuse callback handler, or None if not configured.
 
-    Returns None when LANGFUSE_PUBLIC_KEY is absent or empty, so callers
-    can pass `callbacks=[cb] if cb else []` without any conditional logic.
+    Returns None when public or secret key is absent, so callers can use
+    `callbacks=[cb] if cb else []` without any conditional logic.
+
+    Requires all three: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST.
+    Tracing is silently skipped when any of the first two are missing.
     """
-    if not settings.langfuse_public_key:
+    if not settings.langfuse_public_key or not settings.langfuse_secret_key:
         return None
 
-    # Import only when Langfuse is configured — avoids any startup error if the
-    # langfuse package were missing (it's always present here, but good habit).
     from langfuse.langchain import CallbackHandler
 
-    # Langfuse v4 CallbackHandler accepts public_key; it reads LANGFUSE_SECRET_KEY
-    # and LANGFUSE_HOST from the environment automatically if needed.
+    # v4 CallbackHandler only accepts public_key in its constructor.
+    # It reads LANGFUSE_SECRET_KEY and LANGFUSE_HOST from os.environ automatically.
+    # load_dotenv() in config.py already put the .env values into os.environ,
+    # so the handler picks them up without any extra wiring.
     return CallbackHandler(public_key=settings.langfuse_public_key)
