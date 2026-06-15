@@ -3,10 +3,10 @@ Coach node — turns session grades into actionable feedback.
 
 Reads:  state["grades"]
 Writes: state["weak_areas"]  (list of topics to focus on next session)
+        long-term store[user_id]["weak_areas"]  (Phase 4: cross-session memory)
 
-The coach synthesizes all grades from the current session into a Feedback
-object.  The weak_areas_update field feeds back into the planner in Phase 4,
-where it will change the next session's prep plan.
+The weak_areas written to the store are read by the planner at the START of the
+next session, closing the feedback loop: grade → store → next plan adapts.
 """
 
 from __future__ import annotations
@@ -36,6 +36,38 @@ this candidate should focus on before the next interview."""
 _PROMPT = ChatPromptTemplate.from_messages([("system", _SYSTEM), ("human", _HUMAN)])
 
 
+# ── Store helper ──────────────────────────────────────────────────────────────
+
+
+def _persist_weak_areas(new_areas: list[str]) -> None:
+    """Merge new weak_areas into the long-term store for this user.
+
+    No-op when called outside a graph context or when no store is wired.
+    Merges (not replaces) so areas accumulate across sessions.
+    """
+    try:
+        from langgraph.config import get_config, get_store
+
+        store = get_store()
+        if store is None:
+            return
+        cfg = get_config()
+        user_id = cfg.get("configurable", {}).get("user_id", "default")
+    except RuntimeError:
+        return
+
+    existing = store.get(("loop", "users"), user_id)
+    existing_areas = existing.value.get("weak_areas", []) if existing else []
+    session_count = (existing.value.get("session_count", 0) if existing else 0) + 1
+
+    # Merge: existing first (older, higher priority for ordering) + new
+    merged = list(dict.fromkeys(existing_areas + new_areas))
+    store.put(("loop", "users"), user_id, {"weak_areas": merged, "session_count": session_count})
+
+
+# ── Node ──────────────────────────────────────────────────────────────────────
+
+
 def coach(state: dict) -> dict:
     grades = state.get("grades") or []
     if not grades:
@@ -60,5 +92,8 @@ def coach(state: dict) -> dict:
         {"grades_summary": grades_summary},
         config=config,
     )
+
+    # Persist to store (no-op if store not wired).
+    _persist_weak_areas(feedback.weak_areas_update)
 
     return {"weak_areas": feedback.weak_areas_update}

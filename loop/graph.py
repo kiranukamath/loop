@@ -1,5 +1,5 @@
 """
-Graph assembly — Phase 3: interview loop + orchestration.
+Graph assembly — Phase 4: interview loop + orchestration + memory.
 
 Full topology:
   START → intake → planner → session_router
@@ -8,14 +8,15 @@ Full topology:
       sd_interviewer       ├─► grader → coach → END
       beh_interviewer     ─┘
 
-session_router reads the first session from the PrepPlan and sets
-current_modality.  The conditional edge reads current_modality and routes to
-the matching interviewer.
+Phase 4 additions:
+  - compile_graph_with_memory(): attaches checkpointer + store via loop.memory
+  - planner reads cross-session weak_areas from the store
+  - coach writes weak_areas to the store after each session
+  - main() demonstrates two sessions showing the feedback loop
 
 Run with:  uv run python -m loop.graph
 """
 
-import json
 import pathlib
 
 from langgraph.graph import END, START, StateGraph
@@ -121,101 +122,151 @@ def build_graph() -> StateGraph:
 
 
 def compile_graph():
-    """Compile the graph into a runnable CompiledStateGraph."""
+    """Compile the graph without checkpointer/store (used by tests).
+
+    Tests stub nodes in loop.graph's namespace and call compile_graph() fresh
+    each time — no thread_id required in the invoke config.
+    """
     return build_graph().compile()
 
 
-# ── Module-level compiled graph ───────────────────────────────────────────────
-compiled = compile_graph()
+def compile_graph_with_memory():
+    """Compile the graph with MemorySaver checkpointer + InMemoryStore.
+
+    Required for production use:
+    - invoke must pass config={'configurable': {'thread_id': '...', 'user_id': '...'}}
+    - thread_id isolates graph state per session
+    - user_id keys the long-term store (weak_areas, session_count)
+    """
+    from loop.memory import compile_with_memory
+
+    return compile_with_memory(build_graph())
+
+
+# ── Module-level compiled graph (with memory for the runner) ──────────────────
+compiled = compile_graph_with_memory()
 
 
 # ── Manual runner ─────────────────────────────────────────────────────────────
 
 
-def main() -> None:
-    """Invoke the graph with a canned answer and pretty-print the result."""
-    print("Loop — Phase 3 graph run")
-    print("Invoking: START → intake → planner → session_router → interviewer → grader → coach\n")
+_CANNED_ANSWERS = [
+    {
+        "question_id": "cod-001",
+        "text": (
+            "Use a sliding window with a hash set to track characters. "
+            "Right pointer advances; on duplicate, advance left pointer until "
+            "duplicate removed. Track max window size. O(n) time, O(k) space."
+        ),
+    },
+    {
+        "question_id": "cod-002",
+        "text": (
+            "Use ReentrantLock with two Conditions: notFull and notEmpty. "
+            "put() checks capacity, awaits notFull; take() checks empty, awaits "
+            "notEmpty. Always use while-loops not if for spurious wakeups."
+        ),
+    },
+    {
+        "question_id": "sys-001",
+        "text": (
+            "API gateway accepts payment with idempotency key. Key stored in Redis "
+            "for dedup. Async queue (Kafka) to payment processor. Outbox pattern for "
+            "at-least-once delivery. PostgreSQL event-sourced audit log. Partition by "
+            "merchant_id for scale."
+        ),
+    },
+    {
+        "question_id": "sys-002",
+        "text": (
+            "Token bucket in Redis with Lua script for atomic check-and-decrement. "
+            "Fail-open on Redis outage. Sliding window log for accuracy-critical endpoints."
+        ),
+    },
+    {
+        "question_id": "beh-001",
+        "text": (
+            "Team chose MongoDB for a financial ledger. I disagreed on ACID grounds, "
+            "wrote an RFC comparing Mongo vs Postgres, presented it. We switched to "
+            "Postgres — no consistency issues since."
+        ),
+    },
+    {
+        "question_id": "beh-002",
+        "text": (
+            "A critical reconciliation job was failing silently with no owner. "
+            "I traced the root cause (timezone bug), fixed it, added alerting. "
+            "Zero missed reconciliations since; team adopted the pattern."
+        ),
+    },
+]
 
+
+def _run_session(session_label: str, user_id: str, thread_id: str) -> dict:
+    """Run one full graph session and return the result."""
     cb = get_langfuse_callback()
-    config = {"callbacks": [cb]} if cb else {}
+    callbacks = [cb] if cb else []
 
-    # Pre-inject canned answers for every fixture question so the grader always
-    # has a matching answer regardless of which modality the planner chooses.
-    # Phase 5 will replace this with a real human interrupt.
     state = initial_state()
-    state["answers"] = [
-        {
-            "question_id": "cod-001",
-            "text": (
-                "Use a sliding window with a hash set to track characters. "
-                "Right pointer advances; on duplicate, advance left pointer until "
-                "duplicate removed. Track max window size. O(n) time, O(k) space."
-            ),
-        },
-        {
-            "question_id": "cod-002",
-            "text": (
-                "Use ReentrantLock with two Conditions: notFull and notEmpty. "
-                "put() checks capacity, awaits notFull; take() checks empty, awaits "
-                "notEmpty. Always use while-loops not if for spurious wakeups."
-            ),
-        },
-        {
-            "question_id": "sys-001",
-            "text": (
-                "API gateway accepts payment with idempotency key. Key stored in Redis "
-                "for dedup before processing. Async queue (Kafka) to payment processor. "
-                "Outbox pattern for at-least-once delivery. PostgreSQL with event-sourced "
-                "audit log. Horizontal scaling via partition by merchant_id."
-            ),
-        },
-        {
-            "question_id": "sys-002",
-            "text": (
-                "Token bucket in Redis with Lua script for atomic check-and-decrement. "
-                "Fail-open on Redis outage (accept traffic, log for post-hoc audit). "
-                "Sliding window log for accuracy-critical endpoints. Per-user key with "
-                "TTL equal to the window size."
-            ),
-        },
-        {
-            "question_id": "beh-001",
-            "text": (
-                "Situation: team decided to use MongoDB for a financial ledger. "
-                "Task: I disagreed due to ACID concerns. Actions: wrote a short RFC "
-                "comparing Mongo vs Postgres for our access patterns, presented to "
-                "the team. Result: we switched to Postgres; no data consistency issues "
-                "in production."
-            ),
-        },
-        {
-            "question_id": "beh-002",
-            "text": (
-                "Situation: a critical payment reconciliation job was failing silently "
-                "with no owner. Task: I volunteered to fix it. Actions: traced root "
-                "cause to a timezone bug, fixed it, added monitoring and alerting. "
-                "Result: zero missed reconciliations since; team adopted the alerting "
-                "pattern for other jobs."
-            ),
-        },
-    ]
+    state["answers"] = list(_CANNED_ANSWERS)
 
-    result = compiled.invoke(state, config=config)
+    # thread_id = unique per session (state isolation)
+    # user_id   = stable per user (store lookup / write)
+    config = {
+        "configurable": {"thread_id": thread_id, "user_id": user_id},
+        "callbacks": callbacks,
+    }
+    return compiled.invoke(state, config=config)
 
-    print(f"jd loaded:           {len(result['jd'])} chars")
-    print(f"current_modality:    {result['current_modality']}")
-    print(f"current_question_id: {result['current_question_id']}")
-    print("\n── PrepPlan (first session) ──")
-    if result["plan"] and result["plan"].get("sessions"):
-        print(json.dumps(result["plan"]["sessions"][0], indent=2))
 
-    print("\n── Grade ──")
-    if result["grades"]:
-        print(json.dumps(result["grades"][0], indent=2))
+def main() -> None:
+    """Two-session demo showing the memory feedback loop.
 
-    print(f"\n── Weak areas ──\n{result.get('weak_areas')}")
-    print("\nGraph run complete.")
+    Session 1: cold start — planner sees no stored weak_areas.
+    Session 2: planner reads weak_areas stored by session 1's coach.
+    The second PrepPlan should focus on the areas identified as weak in session 1.
+    """
+    print("Loop — Phase 4 graph run (memory demo)")
+    print("=" * 60)
+
+    # ── Session 1 ─────────────────────────────────────────────────
+    print("\n[ SESSION 1 — cold start, no stored weak areas ]\n")
+    r1 = _run_session("session-1", user_id="kiran", thread_id="loop-session-1")
+
+    print(f"Modality:     {r1['current_modality']}")
+    print(f"Question ID:  {r1['current_question_id']}")
+    print(f"Grade score:  {r1['grades'][0]['score'] if r1.get('grades') else 'n/a'}/10")
+    print(f"Weak areas written to store: {r1.get('weak_areas')}")
+
+    # Check what's now in the store
+    from loop.memory import get_store_instance
+
+    item = get_store_instance().get(("loop", "users"), "kiran")
+    if item:
+        print(f"\nStore after session 1: {item.value}")
+
+    # ── Session 2 ─────────────────────────────────────────────────
+    print("\n[ SESSION 2 — planner reads stored weak areas ]\n")
+    r2 = _run_session("session-2", user_id="kiran", thread_id="loop-session-2")
+
+    print(f"Modality:     {r2['current_modality']}")
+    print(f"Question ID:  {r2['current_question_id']}")
+    print(f"Grade score:  {r2['grades'][0]['score'] if r2.get('grades') else 'n/a'}/10")
+    print(f"Weak areas written to store: {r2.get('weak_areas')}")
+
+    item2 = get_store_instance().get(("loop", "users"), "kiran")
+    if item2:
+        print(f"\nStore after session 2: {item2.value}")
+
+    # ── Thread isolation check ─────────────────────────────────────
+    print("\n[ Thread isolation check ]")
+    s1 = compiled.get_state({"configurable": {"thread_id": "loop-session-1"}})
+    s2 = compiled.get_state({"configurable": {"thread_id": "loop-session-2"}})
+    plan1_sessions = s1.values.get("plan", {}).get("total_sessions", "?") if s1 else "?"
+    plan2_sessions = s2.values.get("plan", {}).get("total_sessions", "?") if s2 else "?"
+    print(f"Session-1 saved plan total_sessions: {plan1_sessions}")
+    print(f"Session-2 saved plan total_sessions: {plan2_sessions}")
+    print("\nPhase 4 run complete.")
 
 
 if __name__ == "__main__":

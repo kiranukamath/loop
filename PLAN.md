@@ -18,13 +18,13 @@ completes.
 | 1 | State & minimal graph | LangGraph mental model | ✅ done & approved | pending |
 | 2 | Planning | structured output, planning | ✅ done & approved | pending |
 | 3 | Interview loop & orchestration | orchestration, sub-agents | ✅ done & approved | — |
-| 4 | Memory | short- + long-term memory | ⬜ not started | — |
+| 4 | Memory | short- + long-term memory | ✅ done & approved | — |
 | 5 | HITL | interrupts & resume | ⬜ not started | — |
 | 6 | Eval & observability | agent evaluation | ⬜ not started | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** Phase 4 — awaiting owner approval of Phase 3.
+**Current phase:** Phase 5 — awaiting owner approval of Phase 4.
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -305,6 +305,26 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 4 — 2026-06-14
+**Built:** `loop/memory.py` (MemorySaver + InMemoryStore singletons, compile_with_memory());
+`loop/nodes/planner.py` updated (_get_stored_weak_areas reads from store, merges with state weak_areas);
+`loop/nodes/coach.py` updated (_persist_weak_areas writes to store after each session);
+`loop/graph.py` updated (compile_graph_with_memory(), two-session demo in main());
+`tests/test_memory.py` (14 new tests covering store basics, planner reads, coach writes,
+thread isolation, cross-session feedback loop). 69/69 tests, 0.38s.
+
+**Key decisions:**
+- `get_store()` and `get_config()` both raise RuntimeError outside a graph context.
+  Both are wrapped in try/except so planner/coach work when called in unit tests directly.
+- `get_store()` returns None inside a graph compiled WITHOUT a store — nodes check `if store is None`.
+- compile_graph() (no memory) stays for tests; compile_graph_with_memory() is for production.
+- Module-level singletons in memory.py ensure the store persists across calls in the same process.
+- user_id passed via config["configurable"]["user_id"] — separate from thread_id so one user can
+  have many sessions but one store entry. Default: "default".
+- v2 seam: swap MemorySaver → AsyncPostgresSaver, InMemoryStore → PostgresStore.
+
+---
 
 ### Phase 3 — 2026-06-14
 **Built:** `loop/tools.py` (get_questions_by_modality, get_question_by_id, get_rubric — v2-stable DAO pattern);

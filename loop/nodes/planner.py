@@ -1,13 +1,15 @@
 """
-Planner node — Phase 2.
+Planner node — Phase 2 (updated Phase 4: reads cross-session weak areas from store).
 
-Reads jd + profile (+ weak_areas in Phase 4) from state, calls the model
-with structured output, and writes a PrepPlan back into state["plan"].
+Reads jd + profile + weak_areas from:
+  1. Long-term store (cross-session, keyed by user_id) — Phase 4 addition
+  2. state["weak_areas"] (current session, from a previous coach run)
 
-This is the first LLM node in the graph.  Every concept introduced here
-(ChatPromptTemplate, with_structured_output, the pipe operator) is reused
-by every subsequent node.
+Both sources are merged and passed to the model.  If no store is wired or the
+node is called outside a graph context, it falls back to state-only weak areas.
 """
+
+from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -16,8 +18,6 @@ from loop.observability import get_langfuse_callback
 from loop.schemas import PrepPlan
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
-# Defined at module level — constructed once, reused on every invocation.
-# Placeholders: {jd}, {profile}, {weak_areas}.
 
 _SYSTEM = """You are an expert technical-interview coach.
 Given a job description and a candidate profile, produce a structured prep plan.
@@ -35,12 +35,33 @@ _HUMAN = """## Job Description
 
 Produce a PrepPlan for this candidate."""
 
-_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", _SYSTEM),
-        ("human", _HUMAN),
-    ]
-)
+_PROMPT = ChatPromptTemplate.from_messages([("system", _SYSTEM), ("human", _HUMAN)])
+
+
+# ── Store helper ──────────────────────────────────────────────────────────────
+
+
+def _get_stored_weak_areas() -> list[str]:
+    """Read weak_areas from the long-term store.
+
+    Returns [] if:
+    - called outside a graph context (RuntimeError from get_config)
+    - the graph was compiled without a store (get_store returns None)
+    - no entry yet for this user_id
+    """
+    try:
+        from langgraph.config import get_config, get_store
+
+        store = get_store()
+        if store is None:
+            return []
+        cfg = get_config()
+        user_id = cfg.get("configurable", {}).get("user_id", "default")
+    except RuntimeError:
+        return []
+
+    item = store.get(("loop", "users"), user_id)
+    return item.value.get("weak_areas", []) if item else []
 
 
 # ── Node ──────────────────────────────────────────────────────────────────────
@@ -58,24 +79,19 @@ def planner(state: dict) -> dict:
     - The | pipe chains them: output of prompt feeds into the model call.
     """
     model = get_chat_model()
-
-    # with_structured_output(PrepPlan) tells the model to fill in the PrepPlan
-    # schema.  LangChain converts the Pydantic model to a tool definition,
-    # calls the model, and deserialises the result back to PrepPlan.
-    # Analogy: Jackson @JsonDeserialize — you get a typed object, not a string.
     structured_model = model.with_structured_output(PrepPlan)
-
-    # Build the chain: prompt template → structured model.
-    # The | operator is LangChain's pipe — same as Unix pipes.
     chain = _PROMPT | structured_model
 
-    # Collect observability callback (no-op if Langfuse not configured).
     cb = get_langfuse_callback()
     config = {"callbacks": [cb]} if cb else {}
 
-    # Format weak_areas as a readable string (empty list → "none").
-    weak_areas = state.get("weak_areas") or []
-    weak_areas_str = ", ".join(weak_areas) if weak_areas else "none"
+    # Merge cross-session weak areas (from store) with current-session ones (from state).
+    # store_areas covers past sessions; state areas cover any coach run earlier this session.
+    store_areas = _get_stored_weak_areas()
+    state_areas = list(state.get("weak_areas") or [])
+    # dict.fromkeys preserves insertion order while deduplicating
+    all_weak_areas = list(dict.fromkeys(store_areas + state_areas))
+    weak_areas_str = ", ".join(all_weak_areas) if all_weak_areas else "none"
 
     plan: PrepPlan = chain.invoke(
         {
@@ -86,5 +102,4 @@ def planner(state: dict) -> dict:
         config=config,
     )
 
-    # Return only the changed key — LangGraph merges this into the full state.
     return {"plan": plan.model_dump()}
