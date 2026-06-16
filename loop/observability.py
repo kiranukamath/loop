@@ -25,6 +25,27 @@ from langchain_core.callbacks import BaseCallbackHandler
 from loop.config import settings
 
 
+def get_langfuse_client():
+    """Return a configured Langfuse client, or None if not configured.
+
+    Used by eval scripts that need to create datasets, dataset items, and scores
+    directly — as opposed to the callback handler used by LangChain nodes.
+
+    Returns None when LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are absent so
+    callers can do `if client: ...` without raising.
+    """
+    if not settings.langfuse_public_key or not settings.langfuse_secret_key:
+        return None
+
+    from langfuse import Langfuse
+
+    os.environ["LANGFUSE_PUBLIC_KEY"] = settings.langfuse_public_key
+    os.environ["LANGFUSE_SECRET_KEY"] = settings.langfuse_secret_key
+    if settings.langfuse_host:
+        os.environ["LANGFUSE_HOST"] = settings.langfuse_host
+    return Langfuse()
+
+
 def get_langfuse_callback() -> BaseCallbackHandler | None:
     """Return a Langfuse callback handler, or None if not configured.
 

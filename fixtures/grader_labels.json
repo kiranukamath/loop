@@ -1,0 +1,86 @@
+{
+  "_comment": "Human-labeled grading examples for Loop's grader eval. Each item has an answer to a fixture question and the human-assigned score (±1 is the acceptable range for agreement).",
+  "items": [
+    {
+      "id": "label-cod-001-strong",
+      "question_id": "cod-001",
+      "answer": "I'll use a sliding window with a hash set. Initialize left=0, right=0, max_len=0. Advance right; if s[right] is already in the set, advance left until we remove it. Update max_len = max(max_len, right - left + 1). Time: O(n), Space: O(k) where k is the character set size. Edge cases: empty string returns 0; all-same chars returns 1; all-unique returns full length.",
+      "expected_score": 9,
+      "score_min": 8,
+      "score_max": 10,
+      "label_notes": "Correct approach, O(n) explicitly stated, edge cases mentioned, clear communication."
+    },
+    {
+      "id": "label-cod-001-medium",
+      "question_id": "cod-001",
+      "answer": "Use a sliding window. I'll have two pointers and move the right pointer forward. When I see a duplicate I move the left pointer. Track the maximum length seen. Should be O(n) time.",
+      "expected_score": 6,
+      "score_min": 5,
+      "score_max": 7,
+      "label_notes": "Correct approach and complexity stated, but no edge cases and communication is thin."
+    },
+    {
+      "id": "label-cod-001-weak",
+      "question_id": "cod-001",
+      "answer": "I would check every substring using two for loops and use a set to check for repeating characters. For each starting position try all end positions. If the substring has no duplicates, update the max. This is O(n^2) time.",
+      "expected_score": 3,
+      "score_min": 2,
+      "score_max": 4,
+      "label_notes": "Brute force O(n^2) — correct but not optimal. Partial credit on correctness, low on complexity."
+    },
+    {
+      "id": "label-cod-002-strong",
+      "question_id": "cod-002",
+      "answer": "I'll use ReentrantLock with two Condition objects: notFull and notEmpty. put() acquires the lock, loops while size==capacity awaiting notFull, adds the item, then signals notEmpty. take() loops while empty awaiting notEmpty, removes, signals notFull. Using while-loops (not if) guards against spurious wakeups. Testing: I'd use CountDownLatch to coordinate producer/consumer threads and verify ordering. Lock is released in finally blocks.",
+      "expected_score": 9,
+      "score_min": 8,
+      "score_max": 10,
+      "label_notes": "Correct blocking semantics, spurious wakeup handled, testing mentioned, while vs if explained."
+    },
+    {
+      "id": "label-cod-002-weak",
+      "question_id": "cod-002",
+      "answer": "Use synchronized methods. Make put() and get() synchronized. If the queue is full in put(), throw an exception. If empty in get(), return null. Use an ArrayList internally.",
+      "expected_score": 2,
+      "score_min": 1,
+      "score_max": 3,
+      "label_notes": "Not blocking — throws/returns instead of blocking. Missing the core concurrent semantics requirement."
+    },
+    {
+      "id": "label-sys-001-strong",
+      "question_id": "sys-001",
+      "answer": "API gateway accepts payment with idempotency key (stored in Redis with TTL). Kafka topic for async processing — producers write payment events, consumers commit offsets after processing. Outbox pattern in the payment service: write to DB and outbox table in one transaction, a separate relay reads the outbox and publishes to Kafka (at-least-once). PostgreSQL event-sourced audit log — every state change is an append-only row. Shard by merchant_id for horizontal scale. Balance check via read replica + optimistic locking on account table.",
+      "expected_score": 9,
+      "score_min": 8,
+      "score_max": 10,
+      "label_notes": "Idempotency, Kafka, outbox pattern, event sourcing, sharding all covered. Solid system design."
+    },
+    {
+      "id": "label-sys-001-medium",
+      "question_id": "sys-001",
+      "answer": "I'd use a microservices architecture. A payment service receives requests and publishes to a message queue. A processor service consumes and updates the database. For idempotency, store a request ID. Use a relational database for the audit log. Scale by adding more processor instances.",
+      "expected_score": 5,
+      "score_min": 4,
+      "score_max": 6,
+      "label_notes": "Correct direction but superficial. Idempotency mentioned but no dedup mechanism. Kafka implied but not named. No outbox or event sourcing."
+    },
+    {
+      "id": "label-beh-001-strong",
+      "question_id": "beh-001",
+      "answer": "Situation: my team chose MongoDB for a payments ledger without a full review. Task: I was concerned about ACID guarantees for financial data. Action: I wrote a design doc comparing Mongo vs Postgres on durability, transaction semantics, and rollback. I presented it with a concrete example of a multi-account transfer that would be inconsistent in Mongo without transactions. I proposed a 2-week spike to prototype the Postgres path. Result: the team agreed, we switched, and in 18 months we had zero consistency incidents. I learned to raise architectural concerns early with evidence rather than opinion.",
+      "expected_score": 9,
+      "score_min": 8,
+      "score_max": 10,
+      "label_notes": "Full STAR, specific and technical, measurable outcome, learning articulated."
+    },
+    {
+      "id": "label-beh-001-medium",
+      "question_id": "beh-001",
+      "answer": "We were using a tool that I thought was wrong. I told my manager about my concerns and we had a meeting about it. Eventually we switched to a better option and things improved.",
+      "expected_score": 3,
+      "score_min": 2,
+      "score_max": 4,
+      "label_notes": "Vague — no specifics, no STAR structure, no technical depth, no measurable outcome."
+    }
+  ]
+}

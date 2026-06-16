@@ -20,11 +20,11 @@ completes.
 | 3 | Interview loop & orchestration | orchestration, sub-agents | ✅ done & approved | — |
 | 4 | Memory | short- + long-term memory | ✅ done & approved | — |
 | 5 | HITL | interrupts & resume | ✅ done & approved | — |
-| 6 | Eval & observability | agent evaluation | ⬜ not started | — |
+| 6 | Eval & observability | agent evaluation | ✅ done & approved | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** Phase 6 — awaiting owner approval of Phase 5.
+**Current phase:** All phases complete. Awaiting owner approval of Phase 6.
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -305,6 +305,29 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 6 — 2026-06-16
+**Built:** `fixtures/grader_labels.json` (9 human-labeled answer→grade pairs across coding,
+system-design, behavioral modalities at strong/medium/weak quality); `evals/__init__.py`;
+`evals/seed_dataset.py` (seeds Langfuse dataset, idempotent via stable item ids, dry-run mode);
+`evals/run_grader_eval.py` (task function, `score_agreement` per-item evaluator, `aggregate_mae`
+run-level evaluator, `run_eval()` using `dataset.run_experiment()`); `evals/trajectory_check.py`
+(`extract_trajectory` from checkpointed state history, `assert_trajectory` with prefix/interviewer/suffix checks);
+`loop/observability.py` updated (added `get_langfuse_client()`); `tests/test_evals.py` (25 new tests).
+110/110 tests, 0.70s. 0 lint errors.
+
+**Key decisions / lessons:**
+- Eval datasets in Langfuse = parameterized fixtures stored externally. Like JUnit `@ParameterizedTest`
+  data, but with run-history tracking across deploys.
+- `dataset.run_experiment()` (Langfuse v4) handles threading, trace linking, and run creation — replaces
+  the manual `item.link()` loop from v2/v3. Accepts `task`, `evaluators` (per-item), `run_evaluators` (aggregate).
+- Two complementary eval dimensions: **output quality** (did grader score correctly?) and **trajectory**
+  (did the agent visit nodes in the right order?). These are independent — a wrong path can produce a right answer.
+- `extract_trajectory()`: `get_state_history()` returns snapshots newest-first; reverse to chronological; collect
+  `snap.next[0]` filtering system nodes (`__start__`, `__end__`, `__resume__`).
+- Stub the entire grader node function (not just its model) in trajectory tests — grader validates `state["answers"]`
+  before calling the model, so patching the model alone still raises.
+- `get_langfuse_client()` returns None when unconfigured so eval scripts degrade gracefully on dev machines.
 
 ### Phase 5 — 2026-06-15
 **Built:** `loop/nodes/readiness.py` (model call → ReadinessVerdict schema → interrupt for human
