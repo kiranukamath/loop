@@ -98,3 +98,29 @@ class Feedback(BaseModel):
     weak_areas_update: list[str] = Field(
         description="Topics the candidate should focus on in future sessions"
     )
+
+
+# ── Phase 5: HITL ─────────────────────────────────────────────────────────────
+
+
+class ReadinessVerdict(BaseModel):
+    """Readiness node output — overall interview readiness after a session.
+
+    The human can approve this verdict or override it at the readiness gate.
+    """
+
+    verdict: Literal["ready", "not_ready"] = Field(
+        description="Whether the candidate is ready to interview for the target role"
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence in the verdict, 0.0 (uncertain) to 1.0 (certain)",
+    )
+    strengths: list[str] = Field(description="Key strengths demonstrated across this session")
+    gaps: list[str] = Field(
+        description="Remaining gaps that need work before the candidate is interview-ready"
+    )
+    recommendation: str = Field(
+        description="One-paragraph actionable recommendation for the candidate"
+    )

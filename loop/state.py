@@ -54,7 +54,7 @@ class LoopState(dict):
 
     # ── Phase 5+ (HITL) ──────────────────────────────────────────────────────
     plan_approved: Optional[bool]
-    readiness_verdict: Optional[str]  # "ready" | "not_ready"
+    readiness_verdict: Optional[dict]  # ReadinessVerdict.model_dump() — may include override_reason
     verdict_approved: Optional[bool]
 
 

@@ -15,6 +15,7 @@ Why we patch loop.graph.grader / loop.graph.coach (not the module functions):
 
 import pytest
 from langchain_core.runnables import RunnableLambda
+from langgraph.types import Command
 
 from loop.schemas import Feedback, Grade, PrepPlan, Session
 
@@ -72,6 +73,14 @@ def stub_graph_nodes(request, monkeypatch):
     fake_planner.with_structured_output.return_value = RunnableLambda(lambda _: _STUB_PLAN)
     monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: fake_planner)
 
+    # ── Stub plan_approval node (HITL gate 1) ────────────────────────────────
+    # The real plan_approval has no static outgoing edge — it always returns Command.
+    # Our stub must also return Command so the graph can route to session_router.
+    monkeypatch.setattr(
+        "loop.graph.plan_approval",
+        lambda state: Command(goto="session_router", update={"plan_approved": True}),
+    )
+
     # ── Stub grader node function ─────────────────────────────────────────────
     # Grader needs answers in state before it can call the model.
     # For graph-mechanics tests we stub the whole node (not just the model) so
@@ -82,4 +91,21 @@ def stub_graph_nodes(request, monkeypatch):
     monkeypatch.setattr(
         "loop.graph.coach",
         lambda state: {"weak_areas": list(_STUB_FEEDBACK.weak_areas_update)},
+    )
+
+    # ── Stub readiness node (HITL gate 2) ─────────────────────────────────────
+    # The real readiness calls interrupt() to pause for human verdict approval.
+    # For graph-mechanics tests we skip the interrupt and return a canned verdict.
+    monkeypatch.setattr(
+        "loop.graph.readiness",
+        lambda state: {
+            "readiness_verdict": {
+                "verdict": "ready",
+                "confidence": 0.9,
+                "strengths": ["solid fundamentals"],
+                "gaps": [],
+                "recommendation": "Go for it.",
+            },
+            "verdict_approved": True,
+        },
     )

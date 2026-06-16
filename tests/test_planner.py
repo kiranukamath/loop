@@ -226,10 +226,22 @@ class TestGraphWithPlanner:
 
         importlib.reload(graph_mod)
 
-        # After reload, grader/coach are real functions again — stub them in the
-        # reloaded module's namespace so the full graph can run without answers.
+        # After reload, all node functions are real again — stub them in the
+        # reloaded module's namespace so the full graph can run without interrupts/answers.
+        from langgraph.types import Command as _Command
+
+        monkeypatch.setattr(
+            graph_mod,
+            "plan_approval",
+            lambda state: _Command(goto="session_router", update={"plan_approved": True}),
+        )
         monkeypatch.setattr(graph_mod, "grader", lambda state: {"grades": []})
         monkeypatch.setattr(graph_mod, "coach", lambda state: {"weak_areas": []})
+        monkeypatch.setattr(
+            graph_mod,
+            "readiness",
+            lambda state: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         from loop.state import initial_state
 

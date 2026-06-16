@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.store.memory import InMemoryStore
+from langgraph.types import Command
 
 from loop.schemas import Feedback, Grade, PrepPlan, Session
 
@@ -55,6 +56,11 @@ def _fake_model(return_value):
     return fake
 
 
+def _stub_plan_approval(state):
+    """Stub for plan_approval: skip interrupt, auto-approve and route to session_router."""
+    return Command(goto="session_router", update={"plan_approved": True})
+
+
 def _compile_with_fresh_memory(graph):
     """Compile graph with brand-new checkpointer + store (test isolation)."""
     store = InMemoryStore()
@@ -65,9 +71,14 @@ def _compile_with_fresh_memory(graph):
 def _run_graph_with_memory(monkeypatch, store, checkpointer, user_id="u1", thread_id="t1"):
     """Run the full graph with fresh memory, returning the result and the store."""
     monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
+    monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
     monkeypatch.setattr("loop.graph.grader", lambda state: {"grades": [_STUB_GRADE.model_dump()]})
     monkeypatch.setattr(
         "loop.graph.coach", lambda state: _persist_and_return(state, _STUB_FEEDBACK, store, user_id)
+    )
+    monkeypatch.setattr(
+        "loop.graph.readiness",
+        lambda state: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
     )
 
     from loop.graph import build_graph
@@ -161,11 +172,17 @@ class TestPlannerReadsStore:
         state = initial_state()
         state["answers"] = [{"question_id": "cod-001", "text": "..."}]
 
-        # Stub grader and coach to avoid needing answers / model
+        # Stub interrupt nodes + model-calling nodes to avoid interrupts and model calls
         import loop.graph as gmod
 
+        monkeypatch.setattr(gmod, "plan_approval", _stub_plan_approval)
         monkeypatch.setattr(gmod, "grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr(gmod, "coach", lambda s: {"weak_areas": []})
+        monkeypatch.setattr(
+            gmod,
+            "readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         app = build_graph().compile(store=store)
         app.invoke(state, config={"configurable": {"user_id": "kiran"}})
@@ -176,8 +193,13 @@ class TestPlannerReadsStore:
     def test_planner_works_with_no_store(self, monkeypatch):
         """Planner works fine when compiled without a store (store=None path)."""
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
+        monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr("loop.graph.coach", lambda s: {"weak_areas": []})
+        monkeypatch.setattr(
+            "loop.graph.readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         from loop.graph import build_graph
         from loop.state import initial_state
@@ -211,8 +233,14 @@ class TestPlannerReadsStore:
         from loop.graph import build_graph
         from loop.state import initial_state
 
+        monkeypatch.setattr(gmod, "plan_approval", _stub_plan_approval)
         monkeypatch.setattr(gmod, "grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr(gmod, "coach", lambda s: {"weak_areas": []})
+        monkeypatch.setattr(
+            gmod,
+            "readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         app = build_graph().compile(store=store)
         state = initial_state()
@@ -234,7 +262,12 @@ class TestCoachWritesStore:
         """Run graph with real coach node (model stubbed) and return result."""
         monkeypatch.setattr("loop.nodes.coach.get_chat_model", lambda: _fake_model(_STUB_FEEDBACK))
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
+        monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
+        monkeypatch.setattr(
+            "loop.graph.readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         from loop.graph import build_graph
         from loop.state import initial_state
@@ -275,7 +308,12 @@ class TestCoachWritesStore:
         """Coach works fine when compiled without a store."""
         monkeypatch.setattr("loop.nodes.coach.get_chat_model", lambda: _fake_model(_STUB_FEEDBACK))
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
+        monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
+        monkeypatch.setattr(
+            "loop.graph.readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         from loop.graph import build_graph
         from loop.state import initial_state
@@ -294,8 +332,13 @@ class TestThreadIsolation:
     def test_different_threads_have_independent_state(self, monkeypatch):
         """Two thread_ids produce independent checkpointed states."""
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
+        monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr("loop.graph.coach", lambda s: {"weak_areas": ["topic-A"]})
+        monkeypatch.setattr(
+            "loop.graph.readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         from loop.graph import build_graph
         from loop.state import initial_state
@@ -325,8 +368,13 @@ class TestThreadIsolation:
     def test_get_state_restores_complete_state(self, monkeypatch):
         """After a run, get_state returns the final state."""
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
+        monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr("loop.graph.coach", lambda s: {"weak_areas": ["X"]})
+        monkeypatch.setattr(
+            "loop.graph.readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         from loop.graph import build_graph
         from loop.state import initial_state
@@ -365,7 +413,12 @@ class TestCrossSessionFeedbackLoop:
 
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _CapturePlanner())
         monkeypatch.setattr("loop.nodes.coach.get_chat_model", lambda: _fake_model(_STUB_FEEDBACK))
+        monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
+        monkeypatch.setattr(
+            "loop.graph.readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
 
         from loop.graph import build_graph
         from loop.state import initial_state

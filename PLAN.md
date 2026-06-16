@@ -19,12 +19,12 @@ completes.
 | 2 | Planning | structured output, planning | ✅ done & approved | pending |
 | 3 | Interview loop & orchestration | orchestration, sub-agents | ✅ done & approved | — |
 | 4 | Memory | short- + long-term memory | ✅ done & approved | — |
-| 5 | HITL | interrupts & resume | ⬜ not started | — |
+| 5 | HITL | interrupts & resume | ✅ done & approved | — |
 | 6 | Eval & observability | agent evaluation | ⬜ not started | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** Phase 5 — awaiting owner approval of Phase 4.
+**Current phase:** Phase 6 — awaiting owner approval of Phase 5.
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -305,6 +305,28 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 5 — 2026-06-15
+**Built:** `loop/nodes/readiness.py` (model call → ReadinessVerdict schema → interrupt for human
+approval/override); `loop/graph.py` updated (plan_approval inline node with interrupt; readiness
+wired after coach; graph topology now has two HITL gates; main() demonstrates the two-gate
+auto-approve flow); `loop/schemas.py` updated (ReadinessVerdict schema added); `loop/state.py`
+updated (readiness_verdict: Optional[dict]); `tests/test_hitl.py` (16 new tests: gate 1 pause,
+payload content, next-nodes, approve/edit/reject paths; gate 2 pause, approve/override paths;
+full two-gate flow, state persistence, thread isolation). 85/85 tests, 0.66s.
+
+**Key decisions / lessons:**
+- `interrupt(payload)` does NOT raise — it returns early with `__interrupt__` in the state
+  dict. The node resumes from the interrupt() call when `app.invoke(Command(resume=...), cfg)`
+  is called with the same thread_id.
+- `Command(goto=END)` does NOT override a static edge. If a node has a static outgoing edge
+  AND returns `Command(goto=END)`, both paths run. Fix: give plan_approval NO static edge —
+  it always returns `Command(goto=...)` to make routing explicit.
+- `Command(goto='X', update={...})` is returned FROM a node to control routing dynamically.
+  `Command(resume=value)` is passed TO `invoke()` from the caller side to resume a paused
+  graph — they are different uses of the same dataclass.
+- All non-HITL tests stub `plan_approval` (returning `Command(goto='session_router', ...)`)
+  and `readiness` (returning a canned verdict dict) so interrupt gates are skipped.
 
 ### Phase 4 — 2026-06-14
 **Built:** `loop/memory.py` (MemorySaver + InMemoryStore singletons, compile_with_memory());
