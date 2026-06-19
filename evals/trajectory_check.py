@@ -43,6 +43,7 @@ INTERVIEWER_NODES = {"coding_interviewer", "sd_interviewer", "beh_interviewer"}
 EXPECTED_TRAJECTORY_SUFFIX = [
     "grader",
     "coach",
+    "advance_session",
     "readiness",
 ]
 

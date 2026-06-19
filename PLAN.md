@@ -21,10 +21,12 @@ completes.
 | 4 | Memory | short- + long-term memory | ✅ done & approved | — |
 | 5 | HITL | interrupts & resume | ✅ done & approved | — |
 | 6 | Eval & observability | agent evaluation | ✅ done & approved | — |
+| 7 | Make it usable (web UI) | streaming + real HITL + durable state | 🟡 in progress | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** All phases complete. Awaiting owner approval of Phase 6.
+**Current phase:** Phase 7 (FastAPI + Tailwind UI). Steps 7a + 7b complete (135 tests).
+Awaiting go-ahead for **7c (SQLite durable persistence)**.
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -292,6 +294,67 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 ---
 
+## Phase 7 — Make it usable (FastAPI + web UI)  *(Capability: streaming + real HITL + durable state)*
+
+**Goal:** turn Loop from a test-only graph into something a human can actually sit down and
+use in a browser. v1 faked every human touchpoint (auto-approved gates, pre-injected answers,
+one session, in-memory state). Phase 7 makes all of those *real*, driven from a clean web UI.
+
+**Owner decisions (2026-06-17):** UI stack = **FastAPI backend + single Tailwind HTML page**
+(no build step, vanilla JS `fetch`/`EventSource`). Scope = **full usable bundle** (streaming +
+real answers/approvals + SQLite persistence + multi-session loop), built incrementally.
+
+**The graph is the unchanged domain service; FastAPI is just a second "driver" beside the tests.**
+This is the lesson: if the architecture is clean, adding a web layer doesn't touch the graph's core.
+
+**New deps to add (verified absent 2026-06-17):**
+`langgraph-checkpoint-sqlite` (SqliteSaver — separate package from core langgraph),
+`fastapi`, `uvicorn[standard]`, `sse-starlette`.
+
+**Concepts to teach (as each sub-step needs them):**
+- **Streaming** (`graph.stream(..., stream_mode=...)`) — emit node/token events as they happen
+  instead of one blocking `invoke()`. The core agentic-UX pattern v1 never used.
+- **SSE (Server-Sent Events)** — one-way server→browser push over plain HTTP. Simpler than
+  WebSockets; perfect for streaming agent progress. Analogy: a long-lived HTTP response that
+  keeps flushing chunks (like a Spring `SseEmitter`).
+- **interrupt() over HTTP** — the LangGraph pause/resume gates become request/response pairs:
+  the interrupt payload is the HTTP response; `Command(resume=...)` is the next request body.
+- **Durable checkpointer** — `SqliteSaver` instead of `MemorySaver`, so sessions + resume
+  survive a process restart (the laptop-friendly middle step before the v2 Postgres swap).
+- **Multi-session orchestration** — loop the graph over *all* planned sessions, not just one.
+
+**Sub-steps (each = one turn: teach → code → test → pause):**
+
+- **7a — Multi-session loop (graph only, no UI).** Add a `session_index` to state.
+  `session_router` picks `sessions[session_index]`. After `coach`, a conditional edge routes
+  back to `session_router` if sessions remain, else on to `readiness`. Tests for the loop.
+  *Why first:* don't build a UI on a one-shot graph.
+- **7b — Real answer gate.** Add a third interrupt: interviewer asks → `interrupt()` for the
+  human's answer → resume → grader grades the real answer. Canned answers kept only as a
+  test fallback. Tests for the new gate.
+- **7c — SQLite persistence.** Add `langgraph-checkpoint-sqlite`; swap `MemorySaver` →
+  `SqliteSaver` behind the existing `loop/memory.py` seam (store decision verified at build
+  time). Prove a session resumes after a simulated restart. Tests.
+- **7d — FastAPI backend (no page yet).** `loop/api.py`: `POST /sessions` (run to first gate),
+  `POST /sessions/{id}/resume` (approve/edit/reject/answer), `GET /sessions/{id}/stream` (SSE
+  node progress). Returns interrupt payloads as JSON. Tests via FastAPI `TestClient` (offline,
+  stubbed model).
+- **7e — Tailwind page.** One static HTML page served by FastAPI: start → review/approve plan →
+  answer questions (streamed) → see feedback → approve/override readiness verdict. Looks clean,
+  zero build step.
+
+**Files touched (across sub-steps):** `loop/graph.py`, `loop/state.py`, `loop/memory.py`,
+`loop/api.py` (new), `loop/static/index.html` (new), `pyproject.toml`, `tests/*`, `PLAN.md`.
+
+**Done when:** a person can open a browser, get a plan, approve it, answer interview questions
+with live streaming, and receive a readiness verdict they can approve/override — and the whole
+session survives a server restart. Tests stay offline (stub the model); lint + pytest pass.
+
+**Skills needed:** FastAPI (routing, `TestClient`, static files); SSE / `sse-starlette`;
+LangGraph `.stream()` + streaming modes; `SqliteSaver`; a little vanilla JS + Tailwind CDN.
+
+---
+
 ## v2 / future enhancements (NOT in v1)
 
 - Real data sources (live JD ingest, real question bank) replacing fixtures.
@@ -305,6 +368,33 @@ API changes between v2 and v3); designing eval metrics; LangGraph run introspect
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 7a+7b — 2026-06-19
+**Built (7a — multi-session loop):** `session_index` field in `LoopState`; `_append_list` reducer on
+`answers` + `grades`; `advance_session` node; `_route_after_session` routing function; conditional edge
+`advance_session → session_router` (continue) or `→ readiness` (done). `tests/test_multisession.py`
+(18 tests). 128 tests, 0 lint errors.
+
+**Built (7b — real answer gate):** `interrupt()` call inside `_ask_question` in `interviewers.py`;
+interviewer now returns AI question message + human answer message + answer delta for the reducer;
+grader refactored to return only the new grade (reducer handles accumulation). Three-gate flow:
+plan_approval → answer_question → approve_verdict; `_run_session_with_hitl` in `graph.py` updated
+to dispatch on interrupt `action` key. All tests updated for 3-gate flow (test_hitl.py redesigned,
+test_memory.py interviewer stubs added). 135 tests, 0.70s, 0 lint errors.
+
+**Key decisions / lessons:**
+- **Loop-back edges:** LangGraph directed graphs can have cycles. `advance_session` increments index,
+  `_route_after_session` decides continue vs done. Clean separation of concerns — like a Spring Batch
+  `RepeatStatus.CONTINUABLE` pattern.
+- **Reducers are essential for accumulating state across loop iterations.** Without `_append_list` on
+  `grades`, session 2 overwrites session 1's grades. The reducer fires: `left ++ right`.
+- **"Return only the delta" rule:** when a field has a reducer, node must return ONLY the new item,
+  not the full accumulated list. Returning the full list causes the reducer to double-append.
+- **`interrupt()` for input, not just decisions.** Gate 2 uses interrupt to collect the candidate's
+  answer text — the graph pauses mid-interviewer-node and resumes with the string.
+- **Stub pattern for interrupt in unit tests:** `monkeypatch.setattr("loop.nodes.interviewers.interrupt", lambda payload: answer)`.
+  Calling an interviewer function directly outside a graph context fails because interrupt() requires
+  a live graph run with a checkpointer.
 
 ### Phase 6 — 2026-06-16
 **Built:** `fixtures/grader_labels.json` (9 human-labeled answer→grade pairs across coding,

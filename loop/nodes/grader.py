@@ -79,6 +79,7 @@ def grader(state: dict) -> dict:
         config=config,
     )
 
-    existing = list(state.get("grades") or [])
-    existing.append(grade.model_dump())
-    return {"grades": existing}
+    # Return only the new grade — the _append_list reducer on state["grades"]
+    # handles accumulation across sessions. Returning the full list here would
+    # cause duplicates in multi-session runs (reducer appends to the existing list).
+    return {"grades": [grade.model_dump()]}

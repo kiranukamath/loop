@@ -107,27 +107,51 @@ class TestTools:
 
 
 class TestInterviewers:
-    def test_coding_interviewer_sets_question_id(self):
+    """Test the question-picking and answer-recording logic of the interviewer nodes.
+
+    The real interviewer calls interrupt() to pause for a human answer.
+    These tests stub interrupt() in the interviewers module so we can call
+    the functions directly and assert on question selection + state structure.
+    The stub returns a canned answer string, as Command(resume="...") would.
+    """
+
+    def _stub_interrupt(self, monkeypatch, answer: str = "stub answer"):
+        monkeypatch.setattr("loop.nodes.interviewers.interrupt", lambda payload: answer)
+
+    def test_coding_interviewer_sets_question_id(self, monkeypatch):
+        self._stub_interrupt(monkeypatch)
         from loop.nodes.interviewers import coding_interviewer
 
         result = coding_interviewer({"answers": []})
         assert result["current_question_id"] is not None
-        # Should be a coding question
         from loop.tools import get_question_by_id
 
         q = get_question_by_id(result["current_question_id"])
         assert q["modality"] == "coding"
 
-    def test_coding_interviewer_adds_ai_message(self):
-        from langchain_core.messages import AIMessage
+    def test_coding_interviewer_adds_ai_and_human_messages(self, monkeypatch):
+        self._stub_interrupt(monkeypatch, answer="my answer")
+        from langchain_core.messages import AIMessage, HumanMessage
 
         from loop.nodes.interviewers import coding_interviewer
 
         result = coding_interviewer({"answers": []})
-        assert len(result["messages"]) == 1
+        assert len(result["messages"]) == 2
         assert isinstance(result["messages"][0], AIMessage)
+        assert isinstance(result["messages"][1], HumanMessage)
+        assert result["messages"][1].content == "my answer"
 
-    def test_sd_interviewer_picks_system_design(self):
+    def test_coding_interviewer_stores_answer_in_state(self, monkeypatch):
+        self._stub_interrupt(monkeypatch, answer="sliding window approach")
+        from loop.nodes.interviewers import coding_interviewer
+
+        result = coding_interviewer({"answers": []})
+        assert len(result["answers"]) == 1
+        assert result["answers"][0]["text"] == "sliding window approach"
+        assert result["answers"][0]["question_id"] == result["current_question_id"]
+
+    def test_sd_interviewer_picks_system_design(self, monkeypatch):
+        self._stub_interrupt(monkeypatch)
         from loop.nodes.interviewers import sd_interviewer
         from loop.tools import get_question_by_id
 
@@ -135,7 +159,8 @@ class TestInterviewers:
         q = get_question_by_id(result["current_question_id"])
         assert q["modality"] == "system_design"
 
-    def test_beh_interviewer_picks_behavioral(self):
+    def test_beh_interviewer_picks_behavioral(self, monkeypatch):
+        self._stub_interrupt(monkeypatch)
         from loop.nodes.interviewers import beh_interviewer
         from loop.tools import get_question_by_id
 
@@ -143,16 +168,18 @@ class TestInterviewers:
         q = get_question_by_id(result["current_question_id"])
         assert q["modality"] == "behavioral"
 
-    def test_interviewer_skips_already_answered_question(self):
+    def test_interviewer_skips_already_answered_question(self, monkeypatch):
         """If cod-001 is in answers, interviewer picks the next coding question."""
+        self._stub_interrupt(monkeypatch)
         from loop.nodes.interviewers import coding_interviewer
 
         state = {"answers": [{"question_id": "cod-001", "text": "..."}]}
         result = coding_interviewer(state)
         assert result["current_question_id"] != "cod-001"
 
-    def test_interviewer_falls_back_when_all_answered(self):
+    def test_interviewer_falls_back_when_all_answered(self, monkeypatch):
         """If all questions answered, falls back to first question (no crash)."""
+        self._stub_interrupt(monkeypatch)
         from loop.nodes.interviewers import coding_interviewer
         from loop.tools import get_questions_by_modality
 
@@ -181,8 +208,13 @@ class TestGrader:
         assert len(result["grades"]) == 1
         assert result["grades"][0]["question_id"] == "cod-001"
 
-    def test_grader_accumulates_grades(self, monkeypatch):
-        """Grader appends to existing grades list."""
+    def test_grader_returns_only_new_grade(self, monkeypatch):
+        """Grader returns only the new grade dict, not the full accumulated list.
+
+        Accumulation across sessions is handled by the _append_list reducer on
+        state["grades"] at the LangGraph level. Returning the full list from the
+        node would cause duplicates when the reducer appends it to the existing list.
+        """
         monkeypatch.setattr("loop.nodes.grader.get_chat_model", lambda: _make_fake_grader())
 
         from loop.nodes.grader import grader
@@ -203,7 +235,9 @@ class TestGrader:
             "grades": existing,
         }
         result = grader(state)
-        assert len(result["grades"]) == 2
+        # Grader returns only the new grade — the reducer in state.py handles merging.
+        assert len(result["grades"]) == 1
+        assert result["grades"][0]["question_id"] == "cod-001"
 
     def test_grader_raises_when_no_answer(self, monkeypatch):
         monkeypatch.setattr("loop.nodes.grader.get_chat_model", lambda: _make_fake_grader())

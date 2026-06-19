@@ -5,13 +5,16 @@ Full topology:
   START → intake → planner → plan_approval [INTERRUPT] → session_router
     ─[conditional on current_modality]─►
       coding_interviewer  ─┐
-      sd_interviewer       ├─► grader → coach → readiness [INTERRUPT] → END
-      beh_interviewer     ─┘
+      sd_interviewer       ├─► grader → coach → advance_session
+      beh_interviewer     ─┘                          │
+                                     ┌────────────────┘
+                                     │ more sessions? → session_router (loop)
+                                     └ all done?     → readiness [INTERRUPT] → END
 
-Phase 5 additions:
-  - plan_approval node: interrupt after planner — human approves/edits/rejects PrepPlan
-  - readiness node: model verdict + interrupt — human approves or overrides readiness call
-  - main() demonstrates the two-gate flow with auto-approve responses
+Phase 7a additions:
+  - advance_session node: increments session_index after each session
+  - _route_after_session: loop back to session_router or proceed to readiness
+  - session_router: now uses session_index to pick the right session (was always [0])
 
 Run with:  uv run python -m loop.graph
 """
@@ -46,20 +49,53 @@ def intake(state: dict) -> dict:
 
 
 def session_router(state: dict) -> dict:
-    """Pick the first session from the PrepPlan and set current_modality.
+    """Pick the current session from the PrepPlan based on session_index.
 
-    Phase 3 runs one session end-to-end.  Multi-session looping (iterate
-    over all sessions) is added in Phase 4+.
+    session_index starts at 0 and is incremented by advance_session after each
+    session completes.  The loop continues until advance_session finds no more
+    sessions and routes to readiness instead of back here.
     """
     plan = state.get("plan") or {}
     sessions = plan.get("sessions") or []
     if not sessions:
         raise ValueError("PrepPlan has no sessions — planner node must run first")
-    session = sessions[0]
+    idx = state.get("session_index") or 0
+    if idx >= len(sessions):
+        raise ValueError(f"session_index {idx} out of range for {len(sessions)} sessions")
+    session = sessions[idx]
     return {
         "current_modality": session["modality"],
         "session_number": session["session_number"],
     }
+
+
+# ── Session advance node + routing ───────────────────────────────────────────
+
+
+def advance_session(state: dict) -> dict:
+    """Increment session_index after a session completes.
+
+    This node has one job: move the cursor forward by 1.
+    The conditional edge after this node decides whether to loop back to
+    session_router (more sessions) or proceed to readiness (all done).
+
+    Analogy: the loop increment (i++) in a for-loop, followed by the
+    condition check (i < n) that controls whether the loop body runs again.
+    """
+    return {"session_index": (state.get("session_index") or 0) + 1}
+
+
+def _route_after_session(state: dict) -> str:
+    """Return 'continue' if there are more sessions, 'done' if all are complete.
+
+    Called by the conditional edge after advance_session.
+    session_index has already been incremented by advance_session, so we compare
+    the new index against the total number of sessions.
+    """
+    plan = state.get("plan") or {}
+    sessions = plan.get("sessions") or []
+    idx = state.get("session_index") or 0
+    return "continue" if idx < len(sessions) else "done"
 
 
 # ── Plan approval node (HITL gate 1) ─────────────────────────────────────────
@@ -139,6 +175,7 @@ def build_graph() -> StateGraph:
     graph.add_node("beh_interviewer", beh_interviewer)
     graph.add_node("grader", grader)
     graph.add_node("coach", coach)
+    graph.add_node("advance_session", advance_session)
     graph.add_node("readiness", readiness)  # HITL gate 2
 
     # Fixed edges: START → intake → planner → plan_approval
@@ -159,12 +196,21 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # All interviewers converge on grader → coach → readiness → END
+    # All interviewers converge on grader → coach → advance_session
     graph.add_edge("coding_interviewer", "grader")
     graph.add_edge("sd_interviewer", "grader")
     graph.add_edge("beh_interviewer", "grader")
     graph.add_edge("grader", "coach")
-    graph.add_edge("coach", "readiness")
+    graph.add_edge("coach", "advance_session")
+
+    # Multi-session loop: advance_session → session_router (more) or readiness (done)
+    # advance_session increments session_index; _route_after_session reads the new value.
+    graph.add_conditional_edges(
+        "advance_session",
+        _route_after_session,
+        path_map={"continue": "session_router", "done": "readiness"},
+    )
+
     graph.add_edge("readiness", END)
 
     return graph

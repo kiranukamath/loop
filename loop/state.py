@@ -17,6 +17,16 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 
+def _append_list(left: list | None, right: list | None) -> list:
+    """Reducer: append right to left, treating None as an empty list.
+
+    Used for fields (grades, answers) that accumulate across loop iterations.
+    Without this, a second session's grader would overwrite the first's grades.
+    Same principle as add_messages, but for plain dicts rather than BaseMessage.
+    """
+    return (left or []) + (right or [])
+
+
 class LoopState(dict):
     """
     LangGraph state for the interview coach.
@@ -45,8 +55,9 @@ class LoopState(dict):
     # ── Phase 3+ (Interview loop) ────────────────────────────────────────────
     current_modality: Optional[str]  # "coding" | "system_design" | "behavioral"
     current_question_id: Optional[str]
-    answers: Optional[list[dict]]  # list of {question_id, answer_text}
-    grades: Optional[list[dict]]  # list of {question_id, score, feedback}
+    # Annotated with _append_list so successive sessions accumulate, not overwrite.
+    answers: Annotated[Optional[list[dict]], _append_list]
+    grades: Annotated[Optional[list[dict]], _append_list]
 
     # ── Phase 4+ (Memory) ────────────────────────────────────────────────────
     weak_areas: Optional[list[str]]  # topic strings that need more work
@@ -56,6 +67,9 @@ class LoopState(dict):
     plan_approved: Optional[bool]
     readiness_verdict: Optional[dict]  # ReadinessVerdict.model_dump() — may include override_reason
     verdict_approved: Optional[bool]
+
+    # ── Phase 7+ (multi-session loop) ────────────────────────────────────────
+    session_index: Optional[int]  # index into plan["sessions"]; starts at 0
 
 
 def initial_state() -> dict:
@@ -79,4 +93,5 @@ def initial_state() -> dict:
         "plan_approved": None,
         "readiness_verdict": None,
         "verdict_approved": None,
+        "session_index": 0,
     }

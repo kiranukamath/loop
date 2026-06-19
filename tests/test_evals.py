@@ -242,7 +242,11 @@ class TestExtractTrajectory:
         state["answers"] = [{"question_id": "cod-001", "text": "sliding window..."}]
 
         app.invoke(state, config=cfg)
+        # Gate 1: approve the plan
         app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+        # Gate 2: answer the interviewer's question (grader is stubbed, so any string works)
+        app.invoke(Command(resume="sliding window approach"), config=cfg)
+        # Gate 3: approve the readiness verdict
         app.invoke(Command(resume={"decision": "approve"}), config=cfg)
 
         return app, cfg
@@ -252,8 +256,9 @@ class TestExtractTrajectory:
         from evals.trajectory_check import extract_trajectory
 
         traj = extract_trajectory(app, cfg)
-        # intake, planner, plan_approval, session_router, interviewer, grader, coach, readiness
-        assert len(traj) == 8
+        # intake, planner, plan_approval, session_router, interviewer,
+        # grader, coach, advance_session, readiness
+        assert len(traj) == 9
 
     def test_trajectory_starts_with_intake(self, monkeypatch):
         app, cfg = self._run_stubbed_graph(monkeypatch)
@@ -283,6 +288,7 @@ class TestExtractTrajectory:
         assert traj_set & INTERVIEWER_NODES, "Expected at least one interviewer node"
         assert "grader" in traj_set
         assert "coach" in traj_set
+        assert "advance_session" in traj_set
         assert "readiness" in traj_set
 
     def test_assert_trajectory_passes_on_valid(self, monkeypatch):
@@ -303,6 +309,7 @@ class TestExtractTrajectory:
             "coding_interviewer",
             # grader missing
             "coach",
+            "advance_session",
             "readiness",
         ]
         with pytest.raises(AssertionError):
@@ -318,6 +325,7 @@ class TestExtractTrajectory:
             "coding_interviewer",
             "grader",
             "coach",
+            "advance_session",
             "readiness",
         ]
         with pytest.raises(AssertionError):

@@ -1,15 +1,24 @@
 """
-Phase 5 HITL tests — interrupt/resume flow for both approval gates.
+Phase 5 + 7b HITL tests — interrupt/resume flow for all three approval gates.
 All offline: model calls are stubbed.
 
+Three interrupt gates in order:
+  Gate 1 — plan_approval  : human approves / edits / rejects the PrepPlan
+  Gate 2 — answer_question: human types their answer to the interviewer's question
+  Gate 3 — readiness      : human approves / overrides the readiness verdict
+
 Tests verify:
-- First invoke pauses at plan_approval with the PrepPlan in the interrupt payload
-- Resuming with 'approve' passes plan_approval and pauses at readiness
-- Resuming readiness 'approve' completes the graph with verdict_approved=True
-- Resuming plan_approval with 'edit' updates state['plan'] before continuing
-- Resuming plan_approval with 'reject' ends the graph without running the interview
-- Resuming readiness with 'override' stores the human's verdict (not the model's)
-- plan_approved and verdict_approved fields are set correctly in all paths
+- Gate 1 pauses with the PrepPlan in the interrupt payload
+- Resuming gate 1 with 'approve' passes through to gate 2 (answer gate)
+- Resuming gate 1 with 'edit' updates state['plan']
+- Resuming gate 1 with 'reject' ends the graph without running the interview
+- Gate 2 pauses with the question payload (action, question_id, question_prompt)
+- Resuming gate 2 stores the answer in state['answers'] and reaches gate 3
+- Gate 3 pauses with the readiness verdict payload
+- Resuming gate 3 with 'approve' stores the model's verdict
+- Resuming gate 3 with 'override' stores the human's choice
+- Full 3-gate happy path completes with all fields set
+- Thread isolation: two threads' interrupt/resume cycles are independent
 """
 
 from langchain_core.runnables import RunnableLambda
@@ -56,6 +65,8 @@ _STUB_FEEDBACK = Feedback(
     weak_areas_update=["Kafka"],
 )
 
+_CANNED_ANSWER = "Use a sliding window with a hash set. O(n) time, O(k) space."
+
 
 def _fake_model(return_value):
     from unittest.mock import MagicMock
@@ -68,8 +79,9 @@ def _fake_model(return_value):
 def _build_app(monkeypatch):
     """Build and compile the graph with MemorySaver; stub all model-calling nodes.
 
-    plan_approval and readiness use the real implementations (they call interrupt),
-    so the HITL tests can exercise the actual pause/resume mechanics.
+    plan_approval, the interviewers (answer gate), and readiness all use their
+    real implementations so HITL tests exercise the actual pause/resume mechanics.
+    Grader, coach model, and readiness model are stubbed.
     """
     monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
     monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
@@ -81,12 +93,26 @@ def _build_app(monkeypatch):
     return build_graph().compile(checkpointer=MemorySaver())
 
 
-def _initial(answers=None):
+def _initial():
+    """Return a blank initial state — no pre-injected answers (interviewer provides them)."""
     from loop.state import initial_state
 
-    s = initial_state()
-    s["answers"] = answers or [{"question_id": "cod-001", "text": "sliding window..."}]
-    return s
+    return initial_state()
+
+
+# ── Helpers to advance through gates ─────────────────────────────────────────
+
+
+def _reach_answer_gate(app, cfg):
+    """Run graph to gate 1, approve plan — returns result paused at gate 2."""
+    app.invoke(_initial(), config=cfg)
+    return app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+
+
+def _reach_readiness_gate(app, cfg):
+    """Run graph through gates 1 and 2, arrive at gate 3 (readiness)."""
+    _reach_answer_gate(app, cfg)
+    return app.invoke(Command(resume=_CANNED_ANSWER), config=cfg)
 
 
 # ── Gate 1: plan_approval ─────────────────────────────────────────────────────
@@ -125,33 +151,28 @@ class TestPlanApprovalGate:
         snap = app.get_state(cfg)
         assert "plan_approval" in snap.next
 
-    def test_resume_approve_continues_to_readiness(self, monkeypatch):
-        """Resuming with 'approve' passes gate 1 and pauses at readiness (gate 2)."""
+    def test_resume_approve_passes_gate1_and_reaches_answer_gate(self, monkeypatch):
+        """Resuming gate 1 with 'approve' passes the plan and pauses at answer gate."""
         app = _build_app(monkeypatch)
         cfg = {"configurable": {"thread_id": "t-pa-approve"}}
 
-        # Gate 1 interrupt
         app.invoke(_initial(), config=cfg)
-
-        # Resume gate 1
         result2 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
 
-        # Should now be at gate 2
         assert "__interrupt__" in result2
-        ipt2 = result2["__interrupt__"][0]
-        assert ipt2.value["action"] == "approve_verdict"
+        assert result2["__interrupt__"][0].value["action"] == "answer_question"
 
     def test_resume_approve_sets_plan_approved_true(self, monkeypatch):
-        """plan_approved=True after human approves the plan."""
+        """plan_approved=True is set after the human approves the plan."""
         app = _build_app(monkeypatch)
         cfg = {"configurable": {"thread_id": "t-pa-approved-flag"}}
 
         app.invoke(_initial(), config=cfg)
         app.invoke(Command(resume={"decision": "approve"}), config=cfg)
-        # Auto-approve readiness too to get final state
-        result3 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+        app.invoke(Command(resume=_CANNED_ANSWER), config=cfg)
+        result4 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
 
-        assert result3["plan_approved"] is True
+        assert result4["plan_approved"] is True
 
     def test_resume_edit_updates_plan_in_state(self, monkeypatch):
         """Resuming with 'edit' writes the human's updated_plan into state['plan']."""
@@ -167,7 +188,7 @@ class TestPlanApprovalGate:
             Command(resume={"decision": "edit", "updated_plan": edited_plan}),
             config=cfg,
         )
-        # Gate 2 interrupt — but state should already carry the edited plan
+        # Paused at answer gate — but state should already carry the edited plan
         snap = app.get_state(cfg)
         assert snap.values.get("plan", {}).get("rationale") == "human-edited rationale"
         assert snap.values.get("plan_approved") is True
@@ -180,69 +201,152 @@ class TestPlanApprovalGate:
         app.invoke(_initial(), config=cfg)
         result2 = app.invoke(Command(resume={"decision": "reject"}), config=cfg)
 
-        # Graph ended — no more interrupts
         assert "__interrupt__" not in result2
         assert result2.get("plan_approved") is False
-        # Interview never ran
         assert not result2.get("grades")
         assert result2.get("readiness_verdict") is None
 
 
-# ── Gate 2: readiness ─────────────────────────────────────────────────────────
+# ── Gate 2: answer_question ───────────────────────────────────────────────────
+
+
+class TestAnswerGate:
+    def test_answer_gate_pauses_with_question_payload(self, monkeypatch):
+        """After plan approved, graph pauses at interviewer with question payload."""
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-aq-pause"}}
+
+        result = _reach_answer_gate(app, cfg)
+
+        assert "__interrupt__" in result
+        ipt = result["__interrupt__"][0]
+        assert ipt.value["action"] == "answer_question"
+
+    def test_answer_gate_payload_has_question_fields(self, monkeypatch):
+        """Question payload contains question_id, title, and prompt."""
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-aq-fields"}}
+
+        result = _reach_answer_gate(app, cfg)
+        payload = result["__interrupt__"][0].value
+
+        for key in ("question_id", "question_title", "question_prompt"):
+            assert key in payload, f"Answer gate payload missing key: {key!r}"
+
+    def test_answer_gate_question_is_coding_modality(self, monkeypatch):
+        """Plan has one coding session — answer gate should ask a coding question."""
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-aq-modality"}}
+
+        result = _reach_answer_gate(app, cfg)
+        qid = result["__interrupt__"][0].value["question_id"]
+
+        from loop.tools import get_question_by_id
+
+        q = get_question_by_id(qid)
+        assert q["modality"] == "coding"
+
+    def test_next_node_at_answer_gate(self, monkeypatch):
+        """get_state().next shows the interviewer node as pending."""
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-aq-next"}}
+        _reach_answer_gate(app, cfg)
+
+        snap = app.get_state(cfg)
+        # The pending node is whichever interviewer ran (coding_interviewer for coding plan)
+        interviewer_nodes = {"coding_interviewer", "sd_interviewer", "beh_interviewer"}
+        assert snap.next[0] in interviewer_nodes
+
+    def test_resume_answer_stores_in_state(self, monkeypatch):
+        """Resuming with answer text stores it in state['answers']."""
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-aq-store"}}
+
+        _reach_answer_gate(app, cfg)
+        result = app.invoke(Command(resume=_CANNED_ANSWER), config=cfg)
+
+        # Graph should now be at readiness gate (gate 3)
+        assert "__interrupt__" in result
+        assert result["__interrupt__"][0].value["action"] == "approve_verdict"
+
+        # Answer is in state
+        answers = result.get("answers") or []
+        assert len(answers) == 1
+        assert answers[0]["text"] == _CANNED_ANSWER
+
+    def test_resume_answer_then_grade_appears(self, monkeypatch):
+        """After answering, grader runs and grade lands in state."""
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-aq-grade"}}
+
+        _reach_answer_gate(app, cfg)
+        result = app.invoke(Command(resume=_CANNED_ANSWER), config=cfg)
+
+        grades = result.get("grades") or []
+        assert len(grades) == 1
+        assert grades[0]["score"] == _STUB_GRADE.score
+
+
+# ── Gate 3: readiness ─────────────────────────────────────────────────────────
 
 
 class TestReadinessGate:
-    def _reach_gate2(self, monkeypatch, thread_id: str):
-        """Helper: run through gate 1, return (app, cfg, gate2_result)."""
+    def test_gate3_pauses_at_readiness(self, monkeypatch):
+        """After answer given, graph pauses at readiness with verdict payload."""
         app = _build_app(monkeypatch)
-        cfg = {"configurable": {"thread_id": thread_id}}
-        app.invoke(_initial(), config=cfg)
-        result2 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
-        return app, cfg, result2
+        cfg = {"configurable": {"thread_id": "t-r-pause"}}
 
-    def test_gate2_pauses_at_readiness(self, monkeypatch):
-        """After gate 1 approved, graph pauses at readiness with verdict payload."""
-        _, _, result2 = self._reach_gate2(monkeypatch, "t-r-pause")
+        result = _reach_readiness_gate(app, cfg)
 
-        assert "__interrupt__" in result2
-        ipt = result2["__interrupt__"][0]
+        assert "__interrupt__" in result
+        ipt = result["__interrupt__"][0]
         assert ipt.value["action"] == "approve_verdict"
         assert "verdict" in ipt.value
         assert ipt.value["verdict"]["verdict"] in ("ready", "not_ready")
 
-    def test_gate2_verdict_payload_has_all_fields(self, monkeypatch):
+    def test_gate3_verdict_payload_has_all_fields(self, monkeypatch):
         """ReadinessVerdict payload has all required fields."""
-        _, _, result2 = self._reach_gate2(monkeypatch, "t-r-fields")
-        verdict = result2["__interrupt__"][0].value["verdict"]
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-r-fields"}}
+
+        result = _reach_readiness_gate(app, cfg)
+        verdict = result["__interrupt__"][0].value["verdict"]
 
         for key in ("verdict", "confidence", "strengths", "gaps", "recommendation"):
             assert key in verdict, f"Verdict key '{key}' missing from interrupt payload"
 
     def test_resume_approve_completes_graph(self, monkeypatch):
-        """Resuming gate 2 with 'approve' completes the graph — no more interrupts."""
-        app, cfg, _ = self._reach_gate2(monkeypatch, "t-r-complete")
-        result3 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+        """Resuming gate 3 with 'approve' completes the graph — no more interrupts."""
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-r-complete"}}
 
-        assert "__interrupt__" not in result3
-        assert result3.get("readiness_verdict") is not None
-        assert result3.get("verdict_approved") is True
+        _reach_readiness_gate(app, cfg)
+        result4 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+
+        assert "__interrupt__" not in result4
+        assert result4.get("readiness_verdict") is not None
+        assert result4.get("verdict_approved") is True
 
     def test_resume_approve_stores_model_verdict(self, monkeypatch):
         """On approve, stored verdict matches the model's output (not overridden)."""
-        app, cfg, result2 = self._reach_gate2(monkeypatch, "t-r-store-model")
-        model_verdict = result2["__interrupt__"][0].value["verdict"]["verdict"]
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-r-store-model"}}
 
-        result3 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+        result3 = _reach_readiness_gate(app, cfg)
+        model_verdict = result3["__interrupt__"][0].value["verdict"]["verdict"]
 
-        assert result3["readiness_verdict"]["verdict"] == model_verdict
-        # No override_reason on a plain approve
-        assert "override_reason" not in result3["readiness_verdict"]
+        result4 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+
+        assert result4["readiness_verdict"]["verdict"] == model_verdict
+        assert "override_reason" not in result4["readiness_verdict"]
 
     def test_resume_override_stores_human_verdict(self, monkeypatch):
         """On override, stored verdict reflects the human's choice and reason."""
-        app, cfg, _ = self._reach_gate2(monkeypatch, "t-r-override")
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-r-override"}}
 
-        result3 = app.invoke(
+        _reach_readiness_gate(app, cfg)
+        result4 = app.invoke(
             Command(
                 resume={
                     "decision": "override",
@@ -253,61 +357,76 @@ class TestReadinessGate:
             config=cfg,
         )
 
-        assert result3["readiness_verdict"]["verdict"] == "ready"
-        assert result3["readiness_verdict"]["override_reason"] == (
+        assert result4["readiness_verdict"]["verdict"] == "ready"
+        assert result4["readiness_verdict"]["override_reason"] == (
             "Strong system-design fundamentals outweigh coding gaps."
         )
-        assert result3.get("verdict_approved") is True
+        assert result4.get("verdict_approved") is True
 
     def test_override_different_from_model(self, monkeypatch):
         """Override flips the verdict — human's choice wins over the model's."""
-        # The stub model returns 'not_ready'; the human overrides to 'ready'
-        app, cfg, result2 = self._reach_gate2(monkeypatch, "t-r-flip")
-        model_verdict = result2["__interrupt__"][0].value["verdict"]["verdict"]
+        app = _build_app(monkeypatch)
+        cfg = {"configurable": {"thread_id": "t-r-flip"}}
 
+        result3 = _reach_readiness_gate(app, cfg)
+        model_verdict = result3["__interrupt__"][0].value["verdict"]["verdict"]
         opposite = "ready" if model_verdict == "not_ready" else "not_ready"
-        result3 = app.invoke(
+
+        result4 = app.invoke(
             Command(
-                resume={"decision": "override", "verdict": opposite, "reason": "human knows best"}
+                resume={
+                    "decision": "override",
+                    "verdict": opposite,
+                    "reason": "human knows best",
+                }
             ),
             config=cfg,
         )
 
-        assert result3["readiness_verdict"]["verdict"] == opposite
-        assert result3["readiness_verdict"]["verdict"] != model_verdict
+        assert result4["readiness_verdict"]["verdict"] == opposite
+        assert result4["readiness_verdict"]["verdict"] != model_verdict
 
 
-# ── Full two-gate flow ────────────────────────────────────────────────────────
+# ── Full 3-gate flow ──────────────────────────────────────────────────────────
 
 
 class TestFullHITLFlow:
-    def test_full_happy_path_approve_both_gates(self, monkeypatch):
-        """Approve both gates — graph runs to completion with all fields set."""
+    def test_full_happy_path_approve_all_gates(self, monkeypatch):
+        """Approve all three gates — graph runs to completion with all fields set."""
         app = _build_app(monkeypatch)
         cfg = {"configurable": {"thread_id": "t-full-happy"}}
 
         r1 = app.invoke(_initial(), config=cfg)
-        assert "__interrupt__" in r1  # gate 1
+        assert "__interrupt__" in r1  # gate 1: plan
+        assert r1["__interrupt__"][0].value["action"] == "approve_plan"
 
         r2 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
-        assert "__interrupt__" in r2  # gate 2
+        assert "__interrupt__" in r2  # gate 2: answer
+        assert r2["__interrupt__"][0].value["action"] == "answer_question"
 
-        r3 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
-        assert "__interrupt__" not in r3  # done
+        r3 = app.invoke(Command(resume=_CANNED_ANSWER), config=cfg)
+        assert "__interrupt__" in r3  # gate 3: readiness
+        assert r3["__interrupt__"][0].value["action"] == "approve_verdict"
 
-        assert r3["plan_approved"] is True
-        assert r3["verdict_approved"] is True
-        assert r3["readiness_verdict"] is not None
-        assert r3["grades"] is not None
-        assert r3["weak_areas"] is not None
+        r4 = app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+        assert "__interrupt__" not in r4  # done
+
+        assert r4["plan_approved"] is True
+        assert r4["verdict_approved"] is True
+        assert r4["readiness_verdict"] is not None
+        assert r4["grades"] is not None
+        assert r4["weak_areas"] is not None
+        assert len(r4["answers"]) == 1
+        assert r4["answers"][0]["text"] == _CANNED_ANSWER
 
     def test_full_flow_state_persisted_across_resumes(self, monkeypatch):
-        """get_state() after each resume shows cumulative state."""
+        """get_state() after final resume shows all cumulative state."""
         app = _build_app(monkeypatch)
         cfg = {"configurable": {"thread_id": "t-full-persist"}}
 
         app.invoke(_initial(), config=cfg)
         app.invoke(Command(resume={"decision": "approve"}), config=cfg)
+        app.invoke(Command(resume=_CANNED_ANSWER), config=cfg)
         app.invoke(Command(resume={"decision": "approve"}), config=cfg)
 
         final_snap = app.get_state(cfg)
@@ -315,6 +434,7 @@ class TestFullHITLFlow:
         assert final_snap.values["plan_approved"] is True
         assert final_snap.values["readiness_verdict"] is not None
         assert final_snap.values["verdict_approved"] is True
+        assert final_snap.values["answers"] is not None
 
     def test_two_threads_are_independent(self, monkeypatch):
         """Different thread_ids produce independent interrupt/resume cycles."""
@@ -326,13 +446,14 @@ class TestFullHITLFlow:
         app.invoke(_initial(), config=cfg_a)
         app.invoke(_initial(), config=cfg_b)
 
-        # Approve A only
+        # Advance A through gate 1 only
         app.invoke(Command(resume={"decision": "approve"}), config=cfg_a)
 
         # B is still at gate 1
         snap_b = app.get_state(cfg_b)
         assert "plan_approval" in snap_b.next
 
-        # A is now at gate 2
+        # A is now at gate 2 (answer gate — inside the interviewer node)
         snap_a = app.get_state(cfg_a)
-        assert "readiness" in snap_a.next
+        interviewer_nodes = {"coding_interviewer", "sd_interviewer", "beh_interviewer"}
+        assert snap_a.next[0] in interviewer_nodes

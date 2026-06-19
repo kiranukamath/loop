@@ -81,6 +81,23 @@ def stub_graph_nodes(request, monkeypatch):
         lambda state: Command(goto="session_router", update={"plan_approved": True}),
     )
 
+    # ── Stub interviewer nodes ────────────────────────────────────────────────
+    # Real interviewers now call interrupt() to collect the human's answer.
+    # For graph-mechanics tests we bypass that gate and return a canned
+    # question_id so the (also-stubbed) grader has something to reference.
+    monkeypatch.setattr(
+        "loop.graph.coding_interviewer",
+        lambda state: {"current_question_id": "cod-001", "messages": []},
+    )
+    monkeypatch.setattr(
+        "loop.graph.sd_interviewer",
+        lambda state: {"current_question_id": "sys-001", "messages": []},
+    )
+    monkeypatch.setattr(
+        "loop.graph.beh_interviewer",
+        lambda state: {"current_question_id": "beh-001", "messages": []},
+    )
+
     # ── Stub grader node function ─────────────────────────────────────────────
     # Grader needs answers in state before it can call the model.
     # For graph-mechanics tests we stub the whole node (not just the model) so

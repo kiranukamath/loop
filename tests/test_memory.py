@@ -72,6 +72,21 @@ def _run_graph_with_memory(monkeypatch, store, checkpointer, user_id="u1", threa
     """Run the full graph with fresh memory, returning the result and the store."""
     monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
     monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
+    # Stub interviewers — bypass the answer-gate interrupt and return a canned question_id.
+    # Answers come from real interviewers via interrupt in production; for memory tests
+    # we only care that coach/store wiring works, not that the answer gate fires.
+    monkeypatch.setattr(
+        "loop.graph.coding_interviewer",
+        lambda state: {"current_question_id": "cod-001", "messages": []},
+    )
+    monkeypatch.setattr(
+        "loop.graph.sd_interviewer",
+        lambda state: {"current_question_id": "sys-001", "messages": []},
+    )
+    monkeypatch.setattr(
+        "loop.graph.beh_interviewer",
+        lambda state: {"current_question_id": "beh-001", "messages": []},
+    )
     monkeypatch.setattr("loop.graph.grader", lambda state: {"grades": [_STUB_GRADE.model_dump()]})
     monkeypatch.setattr(
         "loop.graph.coach", lambda state: _persist_and_return(state, _STUB_FEEDBACK, store, user_id)
@@ -85,10 +100,8 @@ def _run_graph_with_memory(monkeypatch, store, checkpointer, user_id="u1", threa
     from loop.state import initial_state
 
     app = build_graph().compile(checkpointer=checkpointer, store=store)
-    state = initial_state()
-    state["answers"] = [{"question_id": "cod-001", "text": "sliding window..."}]
     cfg = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
-    return app.invoke(state, config=cfg)
+    return app.invoke(initial_state(), config=cfg)
 
 
 def _persist_and_return(state, feedback, store, user_id):
@@ -263,6 +276,19 @@ class TestCoachWritesStore:
         monkeypatch.setattr("loop.nodes.coach.get_chat_model", lambda: _fake_model(_STUB_FEEDBACK))
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
         monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
+        # Stub interviewers — bypass answer-gate interrupt; coach is what we're testing here.
+        monkeypatch.setattr(
+            "loop.graph.coding_interviewer",
+            lambda s: {"current_question_id": "cod-001", "messages": []},
+        )
+        monkeypatch.setattr(
+            "loop.graph.sd_interviewer",
+            lambda s: {"current_question_id": "sys-001", "messages": []},
+        )
+        monkeypatch.setattr(
+            "loop.graph.beh_interviewer",
+            lambda s: {"current_question_id": "beh-001", "messages": []},
+        )
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr(
             "loop.graph.readiness",
@@ -274,10 +300,8 @@ class TestCoachWritesStore:
 
         checkpointer = MemorySaver()
         app = build_graph().compile(checkpointer=checkpointer, store=store)
-        state = initial_state()
-        state["answers"] = [{"question_id": "cod-001", "text": "..."}]
         cfg = {"configurable": {"thread_id": "t1", "user_id": user_id}}
-        return app.invoke(state, config=cfg)
+        return app.invoke(initial_state(), config=cfg)
 
     def test_coach_writes_weak_areas_to_store(self, monkeypatch):
         store = InMemoryStore()
@@ -309,6 +333,18 @@ class TestCoachWritesStore:
         monkeypatch.setattr("loop.nodes.coach.get_chat_model", lambda: _fake_model(_STUB_FEEDBACK))
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
         monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
+        monkeypatch.setattr(
+            "loop.graph.coding_interviewer",
+            lambda s: {"current_question_id": "cod-001", "messages": []},
+        )
+        monkeypatch.setattr(
+            "loop.graph.sd_interviewer",
+            lambda s: {"current_question_id": "sys-001", "messages": []},
+        )
+        monkeypatch.setattr(
+            "loop.graph.beh_interviewer",
+            lambda s: {"current_question_id": "beh-001", "messages": []},
+        )
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr(
             "loop.graph.readiness",
@@ -319,9 +355,7 @@ class TestCoachWritesStore:
         from loop.state import initial_state
 
         app = build_graph().compile()  # no store
-        state = initial_state()
-        state["answers"] = [{"question_id": "cod-001", "text": "..."}]
-        result = app.invoke(state)
+        result = app.invoke(initial_state())
         assert result["weak_areas"] is not None
 
 
@@ -414,6 +448,18 @@ class TestCrossSessionFeedbackLoop:
         monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _CapturePlanner())
         monkeypatch.setattr("loop.nodes.coach.get_chat_model", lambda: _fake_model(_STUB_FEEDBACK))
         monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
+        monkeypatch.setattr(
+            "loop.graph.coding_interviewer",
+            lambda s: {"current_question_id": "cod-001", "messages": []},
+        )
+        monkeypatch.setattr(
+            "loop.graph.sd_interviewer",
+            lambda s: {"current_question_id": "sys-001", "messages": []},
+        )
+        monkeypatch.setattr(
+            "loop.graph.beh_interviewer",
+            lambda s: {"current_question_id": "beh-001", "messages": []},
+        )
         monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
         monkeypatch.setattr(
             "loop.graph.readiness",
@@ -427,16 +473,13 @@ class TestCrossSessionFeedbackLoop:
         store = InMemoryStore()
         app = build_graph().compile(checkpointer=checkpointer, store=store)
 
-        state = initial_state()
-        state["answers"] = [{"question_id": "cod-001", "text": "..."}]
-
         # Session 1: coach writes weak_areas to store
         cfg1 = {"configurable": {"thread_id": "s1", "user_id": "kiran"}}
-        app.invoke(state, config=cfg1)
+        app.invoke(initial_state(), config=cfg1)
 
         # Session 2: planner should read stored weak_areas
         cfg2 = {"configurable": {"thread_id": "s2", "user_id": "kiran"}}
-        app.invoke(state, config=cfg2)
+        app.invoke(initial_state(), config=cfg2)
 
         # Two planner calls captured; second one should mention weak areas
         assert len(captured_prompts) == 2
