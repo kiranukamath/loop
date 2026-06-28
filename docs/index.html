@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loop — Agentic Interview Coach</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { brand: '#6366f1' },
+          fontFamily: { mono: ['ui-monospace','SFMono-Regular','Menlo','monospace'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    html { scroll-behavior: smooth; }
+    .gradient-text {
+      background: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #60a5fa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .card-hover:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(99,102,241,0.15); }
+    .flow-arrow { color: #4f46e5; font-size: 1.4rem; line-height: 1; }
+    .tag { display: inline-flex; align-items: center; gap: 4px; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans antialiased">
+
+<!-- ── Nav ─────────────────────────────────────────────────────────────────── -->
+<nav class="sticky top-0 z-50 border-b border-gray-800/80 bg-gray-950/90 backdrop-blur-sm px-6 py-4">
+  <div class="max-w-5xl mx-auto flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-sm select-none">L</div>
+      <span class="font-semibold text-lg tracking-tight">Loop</span>
+    </div>
+    <div class="flex items-center gap-6 text-sm text-gray-400">
+      <a href="#capabilities" class="hover:text-white transition-colors">Capabilities</a>
+      <a href="#architecture" class="hover:text-white transition-colors">Architecture</a>
+      <a href="#stack" class="hover:text-white transition-colors">Stack</a>
+      <a href="https://github.com/kiranukamath/loop" target="_blank"
+         class="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.745 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Hero ────────────────────────────────────────────────────────────────── -->
+<section class="max-w-5xl mx-auto px-6 pt-20 pb-16 text-center">
+  <div class="inline-flex items-center gap-2 bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 text-xs font-medium px-3 py-1.5 rounded-full mb-6">
+    <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
+    Learning project · 5 agentic AI capabilities
+  </div>
+
+  <h1 class="text-5xl sm:text-6xl font-bold tracking-tight mb-6 leading-[1.1]">
+    <span class="gradient-text">Loop</span><br/>
+    Agentic Interview Coach
+  </h1>
+
+  <p class="text-gray-400 text-lg sm:text-xl max-w-2xl mx-auto leading-relaxed mb-10">
+    An AI agent that builds a personalised prep plan, runs mock interviews across coding,
+    system design, and behavioural domains, grades answers in real time, and delivers a
+    human-approved readiness verdict — all with durable state across sessions.
+  </p>
+
+  <div class="flex items-center justify-center flex-wrap gap-4">
+    <a href="https://github.com/kiranukamath/loop" target="_blank"
+       class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-6 py-3 rounded-xl transition-colors text-sm">
+      View on GitHub →
+    </a>
+    <a href="#architecture"
+       class="bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium px-6 py-3 rounded-xl transition-colors text-sm">
+      See how it works
+    </a>
+  </div>
+</section>
+
+<!-- ── What it does (3 columns) ───────────────────────────────────────────── -->
+<section class="max-w-5xl mx-auto px-6 pb-16">
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="text-2xl mb-3">📋</div>
+      <h3 class="font-semibold text-white mb-1">Personalised plan</h3>
+      <p class="text-gray-400 text-sm leading-relaxed">Reads your job description and profile, identifies key gaps, and generates a multi-session prep curriculum.</p>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="text-2xl mb-3">🎤</div>
+      <h3 class="font-semibold text-white mb-1">Live mock interviews</h3>
+      <p class="text-gray-400 text-sm leading-relaxed">Poses real questions across coding, system design, and behavioural domains. Grades your answer against a detailed rubric.</p>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="text-2xl mb-3">🎯</div>
+      <h3 class="font-semibold text-white mb-1">Readiness verdict</h3>
+      <p class="text-gray-400 text-sm leading-relaxed">Synthesises session feedback into a human-approved ready / not-ready verdict with confidence score and recommended next steps.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── 5 Capabilities ──────────────────────────────────────────────────────── -->
+<section id="capabilities" class="max-w-5xl mx-auto px-6 pb-20">
+  <div class="text-center mb-12">
+    <p class="text-indigo-400 text-xs font-semibold uppercase tracking-widest mb-2">Why it was built</p>
+    <h2 class="text-3xl font-bold text-white">Five agentic AI capabilities, one phase each</h2>
+    <p class="text-gray-400 mt-3 max-w-xl mx-auto">Loop exists to exercise these patterns in a real, runnable system — not toy examples.</p>
+  </div>
+
+  <div class="flex flex-col gap-4">
+
+    <!-- Phase 2 -->
+    <div class="card-hover bg-gray-900 border border-gray-800 rounded-xl p-6 flex gap-5">
+      <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-violet-950 border border-violet-800 flex items-center justify-center text-violet-300 font-bold text-sm">P2</div>
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h3 class="font-semibold text-white">Planning</h3>
+          <span class="text-xs text-violet-400 bg-violet-950/60 px-2 py-0.5 rounded-full border border-violet-800/40">Structured output</span>
+        </div>
+        <p class="text-gray-400 text-sm leading-relaxed">The planner node calls an LLM with <code class="bg-gray-800 px-1 rounded text-xs">.with_structured_output(PrepPlan)</code> — Pydantic schema enforces the output shape. It also reads stored weak areas from prior sessions and folds them into the prompt before generating the next plan.</p>
+      </div>
+    </div>
+
+    <!-- Phase 3 -->
+    <div class="card-hover bg-gray-900 border border-gray-800 rounded-xl p-6 flex gap-5">
+      <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-blue-950 border border-blue-800 flex items-center justify-center text-blue-300 font-bold text-sm">P3</div>
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h3 class="font-semibold text-white">Orchestration</h3>
+          <span class="text-xs text-blue-400 bg-blue-950/60 px-2 py-0.5 rounded-full border border-blue-800/40">Sub-agents · routing · loops</span>
+        </div>
+        <p class="text-gray-400 text-sm leading-relaxed">A conditional edge after <code class="bg-gray-800 px-1 rounded text-xs">session_router</code> dispatches to one of three specialist interviewer nodes (coding / system-design / behavioural). An <code class="bg-gray-800 px-1 rounded text-xs">advance_session</code> node increments the session index and a loop-back edge routes to the next session or to readiness — a directed cycle in the LangGraph.</p>
+      </div>
+    </div>
+
+    <!-- Phase 4 -->
+    <div class="card-hover bg-gray-900 border border-gray-800 rounded-xl p-6 flex gap-5">
+      <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-300 font-bold text-sm">P4</div>
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h3 class="font-semibold text-white">Memory</h3>
+          <span class="text-xs text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/40">Short-term · long-term</span>
+        </div>
+        <p class="text-gray-400 text-sm leading-relaxed"><strong class="text-gray-200">Short-term:</strong> <code class="bg-gray-800 px-1 rounded text-xs">SqliteSaver</code> checkpoints full graph state after every node — interrupts are resumable and process restarts are transparent. <strong class="text-gray-200">Long-term:</strong> <code class="bg-gray-800 px-1 rounded text-xs">InMemoryStore</code> (keyed by user_id) persists weak areas across independent sessions, enabling the planner to adapt its next curriculum.</p>
+      </div>
+    </div>
+
+    <!-- Phase 5 -->
+    <div class="card-hover bg-gray-900 border border-gray-800 rounded-xl p-6 flex gap-5">
+      <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-amber-950 border border-amber-800 flex items-center justify-center text-amber-300 font-bold text-sm">P5</div>
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h3 class="font-semibold text-white">HITL (Human-in-the-Loop)</h3>
+          <span class="text-xs text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-800/40">interrupt() · Command(resume)</span>
+        </div>
+        <p class="text-gray-400 text-sm leading-relaxed">Three approval gates: <code class="bg-gray-800 px-1 rounded text-xs">plan_approval</code> (approve / edit / reject the PrepPlan), the interviewer answer gate (type your response), and <code class="bg-gray-800 px-1 rounded text-xs">readiness</code> (approve or override the verdict). Each gate calls <code class="bg-gray-800 px-1 rounded text-xs">interrupt(payload)</code> to serialise to the checkpoint and pause the graph until <code class="bg-gray-800 px-1 rounded text-xs">Command(resume=...)</code> is sent.</p>
+      </div>
+    </div>
+
+    <!-- Phase 6 -->
+    <div class="card-hover bg-gray-900 border border-gray-800 rounded-xl p-6 flex gap-5">
+      <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-rose-950 border border-rose-800 flex items-center justify-center text-rose-300 font-bold text-sm">P6</div>
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h3 class="font-semibold text-white">Eval</h3>
+          <span class="text-xs text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded-full border border-rose-800/40">Output quality · trajectory</span>
+        </div>
+        <p class="text-gray-400 text-sm leading-relaxed">A human-labeled dataset of 9 answer→grade pairs (strong / medium / weak across all modalities) drives a Langfuse experiment. Two complementary dimensions: <strong class="text-gray-200">output quality</strong> (did the grader score correctly?) and <strong class="text-gray-200">trajectory</strong> (did the agent visit nodes in the right order?). A wrong path can produce a right answer — both checks are needed.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── Architecture flow ───────────────────────────────────────────────────── -->
+<section id="architecture" class="bg-gray-900/40 border-y border-gray-800 py-20">
+  <div class="max-w-5xl mx-auto px-6">
+    <div class="text-center mb-12">
+      <p class="text-indigo-400 text-xs font-semibold uppercase tracking-widest mb-2">How it works</p>
+      <h2 class="text-3xl font-bold text-white">Graph topology</h2>
+      <p class="text-gray-400 mt-3 max-w-lg mx-auto">A directed LangGraph with cycles, three HITL interrupt gates, and a multi-session loop.</p>
+    </div>
+
+    <!-- Flow diagram (text-based) -->
+    <div class="flex flex-col items-center gap-2 font-mono text-sm">
+
+      <div class="bg-gray-800 border border-gray-700 rounded-lg px-5 py-2.5 text-gray-200">START</div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="bg-gray-800 border border-gray-700 rounded-lg px-5 py-2.5 text-gray-200">intake <span class="text-gray-500 text-xs ml-2">load JD + profile</span></div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="bg-gray-800 border border-gray-700 rounded-lg px-5 py-2.5 text-gray-200">planner <span class="text-gray-500 text-xs ml-2">PrepPlan + weak-area context</span></div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="bg-amber-950/60 border border-amber-700/60 rounded-lg px-5 py-2.5 text-amber-200 flex items-center gap-2">
+        <span>🧑‍💻</span> plan_approval <span class="text-amber-400/60 text-xs">HITL gate 1</span>
+      </div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="bg-indigo-950/50 border border-indigo-800/40 rounded-lg px-5 py-2.5 text-indigo-200">session_router <span class="text-indigo-400/60 text-xs ml-1">picks session[index]</span></div>
+
+      <!-- Three branches -->
+      <div class="flex items-start gap-6 mt-2">
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="text-gray-500 text-xs">coding</div>
+          <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-300">coding_interviewer</div>
+        </div>
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="text-gray-500 text-xs">system_design</div>
+          <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-300">sd_interviewer</div>
+        </div>
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="text-gray-500 text-xs">behavioral</div>
+          <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-300">beh_interviewer</div>
+        </div>
+      </div>
+
+      <div class="flex flex-col items-center gap-1 mt-1">
+        <div class="text-gray-600 text-xs">↘ ↓ ↙&nbsp;&nbsp;&nbsp;interrupt() for answer</div>
+      </div>
+
+      <div class="bg-amber-950/60 border border-amber-700/60 rounded-lg px-5 py-2.5 text-amber-200 flex items-center gap-2">
+        <span>💬</span> answer_question <span class="text-amber-400/60 text-xs">HITL gate 2</span>
+      </div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="bg-gray-800 border border-gray-700 rounded-lg px-5 py-2.5 text-gray-200">grader <span class="text-gray-500 text-xs ml-2">score / rubric / feedback</span></div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="bg-gray-800 border border-gray-700 rounded-lg px-5 py-2.5 text-gray-200">coach <span class="text-gray-500 text-xs ml-2">feedback → long-term store</span></div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="bg-indigo-950/50 border border-indigo-800/40 rounded-lg px-5 py-2.5 text-indigo-200">advance_session</div>
+
+      <!-- Loop back / continue -->
+      <div class="flex items-center gap-8 mt-1 text-xs text-gray-500">
+        <div class="flex flex-col items-center gap-1">
+          <span>more sessions?</span>
+          <span class="text-indigo-400">↖ loop back to session_router</span>
+        </div>
+        <div class="flex flex-col items-center gap-1">
+          <span>all done?</span>
+          <span class="text-gray-400">↓</span>
+        </div>
+      </div>
+
+      <div class="bg-amber-950/60 border border-amber-700/60 rounded-lg px-5 py-2.5 text-amber-200 flex items-center gap-2 mt-1">
+        <span>🎯</span> readiness <span class="text-amber-400/60 text-xs">HITL gate 3</span>
+      </div>
+      <div class="flow-arrow">↓</div>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg px-5 py-2.5 text-gray-200">END</div>
+
+    </div>
+
+    <!-- HITL legend -->
+    <div class="flex items-center justify-center gap-4 mt-8 text-xs text-gray-500">
+      <div class="flex items-center gap-1.5">
+        <div class="w-3 h-3 rounded border border-amber-700/60 bg-amber-950/60"></div>
+        HITL interrupt gate
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="w-3 h-3 rounded border border-indigo-800/40 bg-indigo-950/50"></div>
+        Routing / control node
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="w-3 h-3 rounded border border-gray-700 bg-gray-800"></div>
+        Processing node
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Tech stack ──────────────────────────────────────────────────────────── -->
+<section id="stack" class="max-w-5xl mx-auto px-6 py-20">
+  <div class="text-center mb-12">
+    <p class="text-indigo-400 text-xs font-semibold uppercase tracking-widest mb-2">Built with</p>
+    <h2 class="text-3xl font-bold text-white">Tech stack</h2>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="text-xs font-semibold uppercase tracking-widest text-indigo-400 mb-3">Agent runtime</div>
+      <div class="flex flex-col gap-2 text-sm">
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">LangGraph</span><span class="text-gray-300">graph engine — nodes, edges, loops, HITL interrupts, checkpointing</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">LangChain</span><span class="text-gray-300">model abstraction, prompt templates, structured output</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">AWS Bedrock</span><span class="text-gray-300">Claude Haiku 4.5 via <code class="bg-gray-800 px-1 rounded">ChatBedrockConverse</code></span></div>
+      </div>
+    </div>
+
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="text-xs font-semibold uppercase tracking-widest text-emerald-400 mb-3">Persistence</div>
+      <div class="flex flex-col gap-2 text-sm">
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">SqliteSaver</span><span class="text-gray-300">short-term: full graph state checkpointed after every node</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">InMemoryStore</span><span class="text-gray-300">long-term: weak areas + session count per user_id</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">pydantic-settings</span><span class="text-gray-300">config from .env — swappable without code changes</span></div>
+      </div>
+    </div>
+
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="text-xs font-semibold uppercase tracking-widest text-blue-400 mb-3">API & UI</div>
+      <div class="flex flex-col gap-2 text-sm">
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">FastAPI</span><span class="text-gray-300">REST endpoints: start session, resume, stream events</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">SSE</span><span class="text-gray-300">server-sent events stream node activity to the browser in real time</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">Tailwind CSS</span><span class="text-gray-300">dark-theme single-page interview UI (no build step)</span></div>
+      </div>
+    </div>
+
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="text-xs font-semibold uppercase tracking-widest text-rose-400 mb-3">Eval & observability</div>
+      <div class="flex flex-col gap-2 text-sm">
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">Langfuse</span><span class="text-gray-300">tracing, datasets, experiments — self-hosted via Docker</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">pytest</span><span class="text-gray-300">158 offline tests — all stubs, no network calls, ~1s suite</span></div>
+        <div class="flex items-start gap-2"><span class="text-gray-500 w-32 shrink-0">ruff</span><span class="text-gray-300">lint + format, zero warnings</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Quick-start -->
+  <div class="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
+    <div class="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">Quick start</div>
+    <pre class="text-sm text-gray-300 overflow-x-auto leading-relaxed"><code><span class="text-gray-500"># clone and install</span>
+git clone https://github.com/kiranukamath/loop.git &amp;&amp; cd loop
+cp .env.example .env          <span class="text-gray-500"># fill in AWS + Bedrock creds</span>
+uv sync
+
+<span class="text-gray-500"># run tests (offline, no model calls)</span>
+uv run pytest
+
+<span class="text-gray-500"># start the web UI</span>
+uv run uvicorn loop.api:app --port 8000 --reload
+open http://localhost:8000</code></pre>
+  </div>
+</section>
+
+<!-- ── Footer ──────────────────────────────────────────────────────────────── -->
+<footer class="border-t border-gray-800 py-10 text-center text-gray-600 text-sm">
+  <div class="flex items-center justify-center gap-2 mb-2">
+    <div class="w-5 h-5 rounded bg-indigo-700 flex items-center justify-center text-white font-bold text-xs">L</div>
+    <span class="text-gray-500">Loop</span>
+  </div>
+  <p>Built by <a href="https://github.com/kiranukamath" class="text-gray-400 hover:text-white transition-colors">Kiran U Kamath</a> to learn agentic AI patterns — one phase at a time.</p>
+  <p class="mt-1">Python 3.14 · LangGraph · LangChain · AWS Bedrock · FastAPI</p>
+</footer>
+
+</body>
+</html>
