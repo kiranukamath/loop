@@ -21,12 +21,12 @@ completes.
 | 4 | Memory | short- + long-term memory | ✅ done & approved | — |
 | 5 | HITL | interrupts & resume | ✅ done & approved | — |
 | 6 | Eval & observability | agent evaluation | ✅ done & approved | — |
-| 7 | Make it usable (web UI) | streaming + real HITL + durable state | 🟡 in progress | — |
+| 7 | Make it usable (web UI) | streaming + real HITL + durable state | ✅ done & approved | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
-**Current phase:** Phase 7 (FastAPI + Tailwind UI). Steps 7a + 7b complete (135 tests).
-Awaiting go-ahead for **7c (SQLite durable persistence)**.
+**Phase 7 complete ✅ (158 tests, 0 lint errors). All sub-steps 7a–7e done.**
+Loop is fully usable: `uv run uvicorn loop.api:app --port 8000 --reload` → open http://localhost:8000
 
 **Phase 0 decisions (owner, 2026-06-13):**
 - **Two environments:** this laptop = minimal *dev box* — install deps, run `ruff` + unit
@@ -368,6 +368,37 @@ LangGraph `.stream()` + streaming modes; `SqliteSaver`; a little vanilla JS + Ta
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 7c+7d+7e — 2026-06-21
+**Built (7c — SQLite persistence):** `db_path` setting in `config.py`; `_make_checkpointer()` in
+`memory.py` reads config and returns `SqliteSaver(conn)` (with `setup()` + `mkdir -p` on first run)
+or `MemorySaver` when `db_path` is empty. `DB_PATH` set in `.env` → `db/loop_state.sqlite`. `db/`
+gitignored. 3 new tests in `TestCheckpointerFactory` including persistence-across-reconnect test.
+
+**Built (7d — FastAPI backend):** `loop/api.py` — `POST /sessions`, `POST /sessions/{id}/resume`,
+`GET /sessions/{id}/stream` (SSE). `_pending` dict holds the Command between resume POST and next
+stream GET. `_safe_payload()` strips large text fields; only scores/summaries go over the wire.
+`StaticFiles` mount + root redirect to `/static/index.html`. 20 new tests in `test_api.py`.
+`pyproject.toml` updated with `fastapi`, `uvicorn[standard]`, `sse-starlette`,
+`langgraph-checkpoint-sqlite`. `.claude/launch.json` created for preview tool.
+
+**Built (7e — Tailwind UI):** `loop/static/index.html` — single-page dark-theme interview UI.
+Landing screen → progress steps (Plan / Interview / Assessment) → live activity log (SSE node events
+stream in as each agent node completes) → Gate 1 card (PrepPlan review, approve/edit/reject) →
+Gate 2 card (question + textarea, Ctrl+Enter shortcut) → Gate 3 card (readiness verdict,
+approve/override) → Done screen. Verified end-to-end with real Bedrock: 6-session plan generated,
+answer scored 9/10, multi-session loop advancing to session 2.
+
+**Key decisions / lessons:**
+- `SqliteSaver(conn)` takes a raw `sqlite3.Connection` directly; `check_same_thread=False` is required
+  for FastAPI (same thread handles multiple requests). `setup()` is idempotent — safe to call on every startup.
+- One SSE connection per graph segment (open → stream nodes → close on interrupt/done). Browser
+  re-opens EventSource after each resume POST. Simpler than long-lived connections with async queues.
+- `graph.stream(stream_mode="updates")` yields `{node_name: state_delta}` dicts. `__interrupt__`
+  is a special key: value is a tuple of `Interrupt` objects with `.value` = the interrupt payload.
+- FastAPI sync routes run in a thread pool automatically — no `asyncio.run_in_executor` boilerplate needed.
+- All three capabilities (SQLite, FastAPI, SSE) verified live: real Bedrock call, real grading, real
+  multi-session loop visible in the browser.
 
 ### Phase 7a+7b — 2026-06-19
 **Built (7a — multi-session loop):** `session_index` field in `LoopState`; `_append_list` reducer on

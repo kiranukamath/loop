@@ -487,3 +487,76 @@ class TestCrossSessionFeedbackLoop:
             assert area in captured_prompts[1], (
                 f"Stored weak area '{area}' not found in second session planner prompt"
             )
+
+
+# ── Checkpointer factory ──────────────────────────────────────────────────────
+
+
+class TestCheckpointerFactory:
+    """Test _make_checkpointer() selects the right backend from config."""
+
+    def test_no_db_path_returns_memory_saver(self, monkeypatch):
+        monkeypatch.setattr("loop.memory.settings.db_path", "")
+        from loop.memory import _make_checkpointer
+
+        cp = _make_checkpointer()
+        assert isinstance(cp, MemorySaver)
+
+    def test_db_path_set_returns_sqlite_saver(self, monkeypatch, tmp_path):
+        db = str(tmp_path / "test.sqlite")
+        monkeypatch.setattr("loop.memory.settings.db_path", db)
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        from loop.memory import _make_checkpointer
+
+        cp = _make_checkpointer()
+        assert isinstance(cp, SqliteSaver)
+
+    def test_sqlite_saver_persists_state(self, monkeypatch, tmp_path):
+        """Graph state written to SqliteSaver survives a second invocation."""
+        db = str(tmp_path / "persist.sqlite")
+        import sqlite3
+
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        # Build and run a graph once
+        monkeypatch.setattr("loop.nodes.planner.get_chat_model", lambda: _fake_model(_STUB_PLAN))
+        monkeypatch.setattr("loop.graph.plan_approval", _stub_plan_approval)
+        monkeypatch.setattr(
+            "loop.graph.coding_interviewer",
+            lambda s: {"current_question_id": "cod-001", "messages": []},
+        )  # noqa: E501
+        monkeypatch.setattr(
+            "loop.graph.sd_interviewer",
+            lambda s: {"current_question_id": "sys-001", "messages": []},
+        )  # noqa: E501
+        monkeypatch.setattr(
+            "loop.graph.beh_interviewer",
+            lambda s: {"current_question_id": "beh-001", "messages": []},
+        )  # noqa: E501
+        monkeypatch.setattr("loop.graph.grader", lambda s: {"grades": [_STUB_GRADE.model_dump()]})
+        monkeypatch.setattr("loop.graph.coach", lambda s: {"weak_areas": ["binary-search"]})
+        monkeypatch.setattr(
+            "loop.graph.readiness",
+            lambda s: {"readiness_verdict": {"verdict": "ready"}, "verdict_approved": True},
+        )
+
+        from loop.graph import build_graph
+        from loop.state import initial_state
+
+        conn1 = sqlite3.connect(db, check_same_thread=False)
+        saver1 = SqliteSaver(conn1)
+        saver1.setup()
+        app = build_graph().compile(checkpointer=saver1)
+        cfg = {"configurable": {"thread_id": "persist-test"}}
+        app.invoke(initial_state(), config=cfg)
+        conn1.close()
+
+        # Re-open the same file and read state — proves data survived
+        conn2 = sqlite3.connect(db, check_same_thread=False)
+        saver2 = SqliteSaver(conn2)
+        app2 = build_graph().compile(checkpointer=saver2)
+        snap = app2.get_state(cfg)
+        assert snap.values.get("plan") is not None
+        assert snap.values.get("weak_areas") == ["binary-search"]
+        conn2.close()

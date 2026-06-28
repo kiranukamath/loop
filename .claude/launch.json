@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "loop-api",
+      "runtimeExecutable": "/Users/kirankamath/.local/bin/uv",
+      "runtimeArgs": ["run", "uvicorn", "loop.api:app", "--host", "0.0.0.0", "--reload"],
+      "port": 8000,
+      "autoPort": false
+    }
+  ]
+}

@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loop — Interview Coach</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { brand: '#6366f1' },
+          animation: { 'pulse-slow': 'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite' }
+        }
+      }
+    }
+  </script>
+  <style>
+    .activity-entry { animation: slideIn 0.25s ease-out; }
+    @keyframes slideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+    textarea { resize: vertical; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans antialiased">
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">L</div>
+    <span class="font-semibold text-lg tracking-tight">Loop</span>
+    <span class="text-gray-500 text-sm">Interview Coach</span>
+  </div>
+  <div id="header-status" class="text-xs text-gray-500"></div>
+</header>
+
+<!-- ── Main layout ─────────────────────────────────────────────────────────── -->
+<main class="max-w-4xl mx-auto px-4 py-10 flex flex-col gap-8">
+
+  <!-- ── Landing panel ──────────────────────────────────────────────────── -->
+  <section id="panel-landing" class="flex flex-col items-center gap-6 mt-8">
+    <h1 class="text-3xl font-bold text-white tracking-tight">Ready for your mock interview?</h1>
+    <p class="text-gray-400 text-center max-w-md">
+      Loop will build a personalised prep plan, run a mock session, grade your answers, and give you a readiness verdict — with your approval at every step.
+    </p>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 w-full max-w-sm flex flex-col gap-4">
+      <label class="text-sm text-gray-400 font-medium">Your name / user ID</label>
+      <input id="user-id-input" type="text" value="kiran"
+        class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+      <button id="btn-start"
+        class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg px-6 py-2.5 transition-colors text-sm">
+        Start Interview
+      </button>
+    </div>
+  </section>
+
+  <!-- ── Progress steps ─────────────────────────────────────────────────── -->
+  <section id="panel-progress" class="hidden">
+    <div class="flex items-center gap-0">
+      <div class="step-item flex-1 flex flex-col items-center gap-1" data-step="1">
+        <div class="step-circle w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-gray-700 text-gray-500">1</div>
+        <span class="text-xs text-gray-500">Plan</span>
+      </div>
+      <div class="flex-1 h-px bg-gray-800 mt-[-12px]"></div>
+      <div class="step-item flex-1 flex flex-col items-center gap-1" data-step="2">
+        <div class="step-circle w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-gray-700 text-gray-500">2</div>
+        <span class="text-xs text-gray-500">Interview</span>
+      </div>
+      <div class="flex-1 h-px bg-gray-800 mt-[-12px]"></div>
+      <div class="step-item flex-1 flex flex-col items-center gap-1" data-step="3">
+        <div class="step-circle w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-gray-700 text-gray-500">3</div>
+        <span class="text-xs text-gray-500">Assessment</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Activity feed ──────────────────────────────────────────────────── -->
+  <section id="panel-activity" class="hidden">
+    <div class="flex items-center gap-2 mb-3">
+      <div id="activity-spinner" class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse-slow hidden"></div>
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-500">Activity</h2>
+    </div>
+    <div id="activity-log" class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1"></div>
+  </section>
+
+  <!-- ── Action panels (one shown at a time) ────────────────────────────── -->
+
+  <!-- Gate 1: Plan approval -->
+  <section id="panel-plan" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-6 flex flex-col gap-5">
+    <div class="flex items-start justify-between">
+      <div>
+        <h2 class="font-semibold text-white text-lg">Review your prep plan</h2>
+        <p class="text-gray-400 text-sm mt-1">The AI drafted this based on your JD and profile. Approve, edit, or reject.</p>
+      </div>
+      <span class="bg-indigo-950 text-indigo-300 text-xs font-medium px-2.5 py-1 rounded-full">Gate 1 / 3</span>
+    </div>
+
+    <div id="plan-details" class="bg-gray-800 rounded-lg p-4 text-sm text-gray-300 flex flex-col gap-3"></div>
+
+    <div class="flex gap-3">
+      <button id="btn-approve-plan"
+        class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg py-2.5 text-sm transition-colors">
+        Approve plan
+      </button>
+      <button id="btn-reject-plan"
+        class="px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg py-2.5 text-sm transition-colors">
+        Reject
+      </button>
+    </div>
+  </section>
+
+  <!-- Gate 2: Answer question -->
+  <section id="panel-answer" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-6 flex flex-col gap-5">
+    <div class="flex items-start justify-between">
+      <div>
+        <h2 class="font-semibold text-white text-lg" id="question-title">Question</h2>
+        <span id="question-modality" class="text-xs text-gray-500 font-medium mt-0.5 inline-block"></span>
+      </div>
+      <span class="bg-indigo-950 text-indigo-300 text-xs font-medium px-2.5 py-1 rounded-full">Gate 2 / 3</span>
+    </div>
+
+    <div id="question-prompt" class="bg-gray-800 rounded-lg p-4 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></div>
+
+    <div class="flex flex-col gap-2">
+      <label class="text-xs text-gray-500 font-medium">Your answer</label>
+      <textarea id="answer-text" rows="6"
+        placeholder="Type your answer here…"
+        class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-600"></textarea>
+    </div>
+
+    <button id="btn-submit-answer"
+      class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg py-2.5 text-sm transition-colors">
+      Submit answer
+    </button>
+  </section>
+
+  <!-- Gate 3: Readiness verdict -->
+  <section id="panel-verdict" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-6 flex flex-col gap-5">
+    <div class="flex items-start justify-between">
+      <div>
+        <h2 class="font-semibold text-white text-lg">Readiness verdict</h2>
+        <p class="text-gray-400 text-sm mt-1">Review the AI's assessment. Approve it or override with your own judgement.</p>
+      </div>
+      <span class="bg-indigo-950 text-indigo-300 text-xs font-medium px-2.5 py-1 rounded-full">Gate 3 / 3</span>
+    </div>
+
+    <div id="verdict-details" class="bg-gray-800 rounded-lg p-4 text-sm text-gray-300 flex flex-col gap-3"></div>
+
+    <div class="flex gap-3">
+      <button id="btn-approve-verdict"
+        class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg py-2.5 text-sm transition-colors">
+        Approve verdict
+      </button>
+      <button id="btn-override-verdict"
+        class="px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg py-2.5 text-sm transition-colors">
+        Override
+      </button>
+    </div>
+  </section>
+
+  <!-- Done panel -->
+  <section id="panel-done" class="hidden flex flex-col items-center gap-5 py-8">
+    <div class="w-16 h-16 rounded-full bg-emerald-900 flex items-center justify-center text-3xl">✓</div>
+    <h2 class="text-2xl font-bold text-white">Interview complete</h2>
+    <p class="text-gray-400 text-center max-w-sm" id="done-summary"></p>
+    <button id="btn-restart"
+      class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg px-6 py-2.5 text-sm transition-colors">
+      Start a new session
+    </button>
+  </section>
+
+  <!-- Error panel -->
+  <div id="panel-error" class="hidden bg-red-950 border border-red-800 rounded-xl p-4 text-sm text-red-300"></div>
+
+</main>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let threadId = null;
+let userId   = 'kiran';
+let currentEs = null;  // active EventSource
+
+// ── DOM helpers ──────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function showPanel(...ids) {
+  const all = ['panel-landing','panel-progress','panel-activity',
+                'panel-plan','panel-answer','panel-verdict','panel-done','panel-error'];
+  all.forEach(id => {
+    const el = $(id);
+    const show = ids.includes(id);
+    el.classList.toggle('hidden', !show);
+    el.classList.toggle('flex', show && el.tagName !== 'SECTION' ? false : show);
+  });
+}
+
+function setStep(n) {
+  document.querySelectorAll('.step-item').forEach(el => {
+    const step = parseInt(el.dataset.step);
+    const circle = el.querySelector('.step-circle');
+    if (step < n) {
+      circle.className = 'step-circle w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold bg-indigo-600 border-2 border-indigo-600 text-white';
+    } else if (step === n) {
+      circle.className = 'step-circle w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-indigo-500 text-indigo-400';
+    } else {
+      circle.className = 'step-circle w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-gray-700 text-gray-500';
+    }
+  });
+}
+
+function setSpinner(on) {
+  $('activity-spinner').classList.toggle('hidden', !on);
+}
+
+function addActivity(icon, text, sub) {
+  const log = $('activity-log');
+  const row = document.createElement('div');
+  row.className = 'activity-entry flex items-start gap-3 py-2 border-b border-gray-800/60 last:border-0';
+  row.innerHTML = `
+    <span class="text-base mt-0.5">${icon}</span>
+    <div>
+      <div class="text-sm text-gray-200">${text}</div>
+      ${sub ? `<div class="text-xs text-gray-500 mt-0.5">${sub}</div>` : ''}
+    </div>`;
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+function showError(msg) {
+  const el = $('panel-error');
+  el.textContent = '⚠ ' + msg;
+  el.classList.remove('hidden');
+}
+
+function setHeader(text) {
+  $('header-status').textContent = text;
+}
+
+// ── Node event → activity entry ──────────────────────────────────────────────
+const NODE_META = {
+  intake:              ['📋', 'Loading your JD and profile'],
+  planner:             ['🗺', 'Building your prep plan'],
+  plan_approval:       ['🧑‍💻', 'Waiting for plan approval'],
+  session_router:      ['🔀', 'Routing to next session'],
+  coding_interviewer:  ['💻', 'Coding question selected'],
+  sd_interviewer:      ['🏗', 'System design question selected'],
+  beh_interviewer:     ['🎤', 'Behavioural question selected'],
+  grader:              ['📊', 'Grading your answer'],
+  coach:               ['🧑‍🏫', 'Coach synthesising feedback'],
+  advance_session:     ['➡', 'Session complete — advancing'],
+  readiness:           ['🎯', 'Generating readiness verdict'],
+};
+
+function nodeActivity(event) {
+  const [icon, label] = NODE_META[event.node] || ['⚙', event.node];
+  let sub = null;
+  if (event.plan_summary) {
+    sub = `${event.plan_summary.total_sessions} sessions · gaps: ${(event.plan_summary.key_gaps||[]).join(', ') || 'none'}`;
+  }
+  if (event.grades && event.grades.length) {
+    const g = event.grades[event.grades.length - 1];
+    sub = `Score: ${g.score}/10 for ${g.question_id}`;
+  }
+  if (event.current_modality) {
+    sub = (sub ? sub + ' · ' : '') + `modality: ${event.current_modality}`;
+  }
+  addActivity(icon, label, sub);
+}
+
+// ── SSE stream ───────────────────────────────────────────────────────────────
+function openStream() {
+  if (currentEs) currentEs.close();
+  setSpinner(true);
+
+  const es = new EventSource(`/sessions/${threadId}/stream?user_id=${encodeURIComponent(userId)}`);
+  currentEs = es;
+
+  es.onmessage = (e) => {
+    let event;
+    try { event = JSON.parse(e.data); } catch { return; }
+
+    if (event.type === 'node') {
+      nodeActivity(event);
+    } else if (event.type === 'interrupt') {
+      setSpinner(false);
+      es.close();
+      handleInterrupt(event);
+    } else if (event.type === 'done') {
+      setSpinner(false);
+      es.close();
+      handleDone();
+    }
+  };
+
+  es.onerror = () => {
+    setSpinner(false);
+    es.close();
+    showError('Connection lost. Please refresh and try again.');
+  };
+}
+
+// ── Resume helper ────────────────────────────────────────────────────────────
+async function resume(body) {
+  try {
+    const r = await fetch(`/sessions/${threadId}/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) { showError(`Resume failed: ${r.status}`); return; }
+    openStream();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+// ── Interrupt handlers ───────────────────────────────────────────────────────
+function handleInterrupt(event) {
+  if (event.action === 'approve_plan')    showPlanGate(event);
+  else if (event.action === 'answer_question') showAnswerGate(event);
+  else if (event.action === 'approve_verdict') showVerdictGate(event);
+  else showError(`Unknown interrupt action: ${event.action}`);
+}
+
+function showPlanGate(event) {
+  setStep(1);
+  const plan = event.plan || {};
+  const sessions = (plan.sessions || []).map((s,i) =>
+    `<div class="flex items-start gap-2">
+       <span class="font-medium text-gray-200">Session ${s.session_number}:</span>
+       <span>${s.modality} — ${s.focus || s.topics?.join(', ')}</span>
+     </div>`).join('');
+
+  $('plan-details').innerHTML = `
+    <div class="flex flex-col gap-2">
+      <div><span class="text-gray-400">Total sessions:</span> <span class="font-semibold text-white">${plan.total_sessions || '?'}</span></div>
+      <div><span class="text-gray-400">Key gaps:</span> <span>${(plan.key_gaps||[]).join(', ') || '—'}</span></div>
+      ${sessions ? `<div class="flex flex-col gap-1 mt-1 border-t border-gray-700 pt-2">${sessions}</div>` : ''}
+      ${plan.rationale ? `<div class="italic text-gray-400 border-t border-gray-700 pt-2">${plan.rationale}</div>` : ''}
+    </div>`;
+
+  showPanel('panel-progress', 'panel-activity', 'panel-plan');
+}
+
+function showAnswerGate(event) {
+  setStep(2);
+  $('question-title').textContent = event.question_title || 'Question';
+  $('question-modality').textContent = event.question_id ? `ID: ${event.question_id}` : '';
+  $('question-prompt').textContent = event.question_prompt || '';
+  $('answer-text').value = '';
+  showPanel('panel-progress', 'panel-activity', 'panel-answer');
+  $('answer-text').focus();
+}
+
+function showVerdictGate(event) {
+  setStep(3);
+  const v = event.verdict || {};
+  const verdict = v.verdict || '?';
+  const verdictColor = verdict === 'ready' ? 'text-emerald-400' : 'text-amber-400';
+  const confidence = v.confidence != null ? `${Math.round(v.confidence * 100)}%` : '?';
+
+  $('verdict-details').innerHTML = `
+    <div class="flex items-center gap-3 mb-2">
+      <span class="text-2xl font-bold ${verdictColor}">${verdict.toUpperCase()}</span>
+      <span class="text-gray-400 text-xs">Confidence: ${confidence}</span>
+    </div>
+    ${(v.strengths||[]).length ? `<div><span class="text-gray-400">Strengths:</span> ${v.strengths.join(', ')}</div>` : ''}
+    ${(v.gaps||[]).length ? `<div><span class="text-gray-400">Gaps:</span> ${v.gaps.join(', ')}</div>` : ''}
+    ${v.recommendation ? `<div class="italic text-gray-400 border-t border-gray-700 pt-2">${v.recommendation}</div>` : ''}`;
+
+  // Store verdict for potential override
+  $('panel-verdict').dataset.verdict = JSON.stringify(v);
+  showPanel('panel-progress', 'panel-activity', 'panel-verdict');
+}
+
+function handleDone() {
+  setStep(4); // all steps complete
+  const lastActivity = $('activity-log').lastElementChild;
+  const summary = 'Your session is complete. Check the activity log for your feedback summary.';
+  $('done-summary').textContent = summary;
+  showPanel('panel-progress', 'panel-activity', 'panel-done');
+  addActivity('🏁', 'Done!', 'All gates complete.');
+}
+
+// ── Button wiring ─────────────────────────────────────────────────────────────
+$('btn-start').addEventListener('click', async () => {
+  userId = $('user-id-input').value.trim() || 'default';
+  try {
+    const r = await fetch(`/sessions?user_id=${encodeURIComponent(userId)}`, { method: 'POST' });
+    if (!r.ok) { showError(`Failed to create session: ${r.status}`); return; }
+    const data = await r.json();
+    threadId = data.thread_id;
+    setHeader(`Session: ${threadId.slice(0,8)}… · User: ${userId}`);
+    showPanel('panel-progress', 'panel-activity');
+    addActivity('🚀', 'Session started', `thread: ${threadId.slice(0,8)}…`);
+    setStep(1);
+    openStream();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+$('btn-approve-plan').addEventListener('click', () => {
+  addActivity('✅', 'Plan approved');
+  resume({ action: 'approve_plan', decision: 'approve' });
+});
+
+$('btn-reject-plan').addEventListener('click', () => {
+  addActivity('❌', 'Plan rejected — ending session');
+  resume({ action: 'approve_plan', decision: 'reject' });
+});
+
+$('btn-submit-answer').addEventListener('click', () => {
+  const answer = $('answer-text').value.trim();
+  if (!answer) {
+    $('answer-text').classList.add('ring-2','ring-red-500');
+    setTimeout(() => $('answer-text').classList.remove('ring-2','ring-red-500'), 1500);
+    return;
+  }
+  addActivity('💬', 'Answer submitted', answer.slice(0, 80) + (answer.length > 80 ? '…' : ''));
+  showPanel('panel-progress', 'panel-activity');
+  setSpinner(true);
+  resume({ action: 'answer_question', answer });
+});
+
+$('btn-approve-verdict').addEventListener('click', () => {
+  addActivity('✅', 'Verdict approved');
+  resume({ action: 'approve_verdict', decision: 'approve' });
+});
+
+$('btn-override-verdict').addEventListener('click', () => {
+  const raw = $('panel-verdict').dataset.verdict || '{}';
+  const v = JSON.parse(raw);
+  const current = v.verdict || 'not_ready';
+  const override = current === 'ready' ? 'not_ready' : 'ready';
+  addActivity('🔄', `Verdict overridden → ${override}`);
+  resume({ action: 'approve_verdict', decision: 'override', verdict: override, reason: 'Human override' });
+});
+
+$('btn-restart').addEventListener('click', () => {
+  threadId = null;
+  $('activity-log').innerHTML = '';
+  showPanel('panel-landing');
+});
+
+// Ctrl+Enter to submit answer
+$('answer-text').addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter') $('btn-submit-answer').click();
+});
+</script>
+</body>
+</html>

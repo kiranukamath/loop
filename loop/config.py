@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # "bedrock" is the only implemented provider in v1.
     model_provider: str = "bedrock"
 
+    # ── Persistence ──────────────────────────────────────────────────────────
+    # Path to the SQLite file used by SqliteSaver.  Empty = use MemorySaver
+    # (in-memory, lost on restart — fine for tests and quick dev runs).
+    # Set to a real path (e.g. "loop_state.sqlite") for durable persistence.
+    db_path: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
