@@ -55,6 +55,9 @@ class LoopState(dict):
     # ── Phase 3+ (Interview loop) ────────────────────────────────────────────
     current_modality: Optional[str]  # "coding" | "system_design" | "behavioral"
     current_question_id: Optional[str]
+    # ── Phase 8b (semantic question selection) ───────────────────────────────
+    current_focus: Optional[str]  # session.focus — what the interviewer searches for
+    current_topics: Optional[list[str]]  # session.topics — folded into the search query
     # Annotated with _append_list so successive sessions accumulate, not overwrite.
     answers: Annotated[Optional[list[dict]], _append_list]
     grades: Annotated[Optional[list[dict]], _append_list]
@@ -86,6 +89,8 @@ def initial_state() -> dict:
         "plan": None,
         "current_modality": None,
         "current_question_id": None,
+        "current_focus": None,
+        "current_topics": None,
         "answers": None,
         "grades": None,
         "weak_areas": None,

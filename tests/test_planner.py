@@ -247,4 +247,7 @@ class TestGraphWithPlanner:
 
         result = graph_mod.compile_graph().invoke(initial_state())
         assert result["plan"] is not None
-        assert result["plan"]["total_sessions"] == 4
+        # total_sessions is capped at settings.max_sessions (default 2);
+        # the fake plan starts at 4 but the planner node trims it.
+        from loop.config import settings as _s
+        assert result["plan"]["total_sessions"] <= _s.max_sessions

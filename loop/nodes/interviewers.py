@@ -2,12 +2,15 @@
 Interviewer nodes — one per modality.
 
 Each node:
-1. Finds the first unanswered question for the current modality from the fixture bank.
+1. Finds the best unanswered question for the current modality by semantic
+   similarity to the session's focus (Phase 8b) — not just fixture order.
 2. Calls interrupt() to surface the question to the human and wait for their answer.
    The resume value is the answer text (a plain string).
 3. Stores current_question_id + the human's answer in state.
 
 Phase 7b: answers come from the human via interrupt/resume, not pre-injected.
+Phase 8b: question selection is semantic (search_questions) instead of exact-match
+          (get_questions_by_modality[0]) — see loop/retrieval.py for the RAG pipeline.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
 
-from loop.tools import get_questions_by_modality
+from loop.tools import get_questions_by_modality, search_questions
 
 
 def _ask_question(state: dict, modality: str) -> dict:
@@ -26,15 +29,27 @@ def _ask_question(state: dict, modality: str) -> dict:
 
     The _append_list reducer on state["answers"] accumulates answers across sessions,
     so answered_ids correctly skips questions the candidate already answered.
+
+    Question selection (Phase 8b): search_questions() ranks the modality's questions
+    by semantic similarity to the session's focus + topics.  k is set to the full
+    size of the modality's question pool so we can still skip already-answered
+    questions while ranking by relevance, rather than truncating the pool early.
     """
-    questions = get_questions_by_modality(modality)
-    if not questions:
+    focus = state.get("current_focus") or modality
+    topics = state.get("current_topics") or []
+    query = f"{focus}. Topics: {', '.join(topics)}" if topics else focus
+
+    pool_size = len(get_questions_by_modality(modality))
+    if pool_size == 0:
         raise ValueError(f"No questions found for modality: {modality!r}")
+
+    candidates = search_questions(query, modality=modality, k=pool_size)
 
     answered_ids = {a["question_id"] for a in (state.get("answers") or [])}
 
-    # Pick the first question not yet answered; fall back to first if all answered.
-    question = next((q for q in questions if q["id"] not in answered_ids), questions[0])
+    # Pick the most relevant question not yet answered; fall back to the top
+    # candidate if all have been answered.
+    question = next((q for q in candidates if q["id"] not in answered_ids), candidates[0])
 
     # Pause here: show the question, wait for the human's typed answer.
     # On resume, answer_text is whatever the caller passed to Command(resume=...).

@@ -66,6 +66,8 @@ def session_router(state: dict) -> dict:
     return {
         "current_modality": session["modality"],
         "session_number": session["session_number"],
+        "current_focus": session.get("focus"),
+        "current_topics": session.get("topics"),
     }
 
 

@@ -17,6 +17,54 @@
       "prompt": "Implement a thread-safe bounded blocking queue in Java (or Python) with put() and get() methods.\n\nDiscuss the synchronization strategy, potential deadlocks, and how you'd test it."
     },
     {
+      "id": "cod-003",
+      "modality": "coding",
+      "topic": "algorithms",
+      "difficulty": "easy",
+      "title": "Binary search and its variants",
+      "prompt": "Implement binary search on a sorted array. Then extend it to find the first and last position of a target value.\n\nAnalyze the time and space complexity and discuss edge cases."
+    },
+    {
+      "id": "cod-004",
+      "modality": "coding",
+      "topic": "trees",
+      "difficulty": "medium",
+      "title": "Lowest common ancestor of a binary tree",
+      "prompt": "Given a binary tree and two nodes p and q, find their lowest common ancestor.\n\nSolve it for: (a) a general binary tree, (b) a binary search tree. What changes between the two?"
+    },
+    {
+      "id": "cod-005",
+      "modality": "coding",
+      "topic": "dynamic-programming",
+      "difficulty": "medium",
+      "title": "Coin change problem",
+      "prompt": "Given coin denominations and a target amount, find the minimum number of coins to make the amount.\n\nDiscuss the greedy approach and why it fails, then implement the dynamic programming solution."
+    },
+    {
+      "id": "cod-006",
+      "modality": "coding",
+      "topic": "graphs",
+      "difficulty": "medium",
+      "title": "Connected components and cycle detection",
+      "prompt": "Implement BFS and DFS on an adjacency list. Use one to find all connected components and the other to detect a cycle in an undirected graph.\n\nDiscuss trade-offs between BFS and DFS."
+    },
+    {
+      "id": "cod-007",
+      "modality": "coding",
+      "topic": "intervals",
+      "difficulty": "medium",
+      "title": "Merge overlapping intervals",
+      "prompt": "Given a list of intervals [start, end], merge all overlapping ones and return the result.\n\nExample: [[1,3],[2,6],[8,10],[15,18]] → [[1,6],[8,10],[15,18]]\n\nWhat is the time complexity? How would you handle a streaming input?"
+    },
+    {
+      "id": "cod-008",
+      "modality": "coding",
+      "topic": "recursion",
+      "difficulty": "hard",
+      "title": "Fast power function with overflow handling",
+      "prompt": "Implement pow(x, n) (x raised to the power n) efficiently, handling negative exponents and potential integer overflow.\n\nExplain the divide-and-conquer approach and its time complexity versus the naive loop."
+    },
+    {
       "id": "sys-001",
       "modality": "system_design",
       "topic": "payments",
@@ -27,10 +75,58 @@
     {
       "id": "sys-002",
       "modality": "system_design",
-      "topic": "distributed-cache",
+      "topic": "rate-limiting",
       "difficulty": "medium",
       "title": "Design a distributed rate limiter",
       "prompt": "Design a distributed rate limiter that enforces per-user request limits across a fleet of API servers.\n\nConsider: token bucket vs sliding window, Redis vs in-process, accuracy vs latency tradeoffs."
+    },
+    {
+      "id": "sys-003",
+      "modality": "system_design",
+      "topic": "consistency",
+      "difficulty": "hard",
+      "title": "CAP theorem and consistency trade-offs",
+      "prompt": "A client wants strong consistency across all nodes in their distributed database. Explain the CAP theorem and why this is impossible under network partitions.\n\nCompare eventual consistency vs linearizability. Which real-world systems choose which, and why?"
+    },
+    {
+      "id": "sys-004",
+      "modality": "system_design",
+      "topic": "messaging",
+      "difficulty": "medium",
+      "title": "Design an event-driven notification system",
+      "prompt": "Design a notification system that delivers email, SMS, and push notifications triggered by user events (order placed, payment received, etc.).\n\nAddress: fan-out at scale, at-least-once vs exactly-once delivery, retry and dead-letter queues."
+    },
+    {
+      "id": "sys-005",
+      "modality": "system_design",
+      "topic": "databases",
+      "difficulty": "medium",
+      "title": "Design a URL shortener",
+      "prompt": "Design a URL shortening service (like bit.ly) that handles 100M URLs and 1B redirects per day.\n\nAddress: ID generation (no collisions), redirect latency, analytics, and storage choices."
+    },
+    {
+      "id": "sys-006",
+      "modality": "system_design",
+      "topic": "consensus",
+      "difficulty": "hard",
+      "title": "Distributed leader election and consensus",
+      "prompt": "Explain how Raft achieves consensus in a distributed system. Walk through a leader election scenario and a log replication scenario, including what happens when the leader fails mid-replication."
+    },
+    {
+      "id": "sys-007",
+      "modality": "system_design",
+      "topic": "search",
+      "difficulty": "hard",
+      "title": "Design a full-text search system",
+      "prompt": "Design a full-text search system for a document corpus of 1 billion documents.\n\nAddress: inverted index construction, tokenization and stemming, ranking (TF-IDF or BM25), and how you'd handle real-time index updates."
+    },
+    {
+      "id": "sys-008",
+      "modality": "system_design",
+      "topic": "caching",
+      "difficulty": "medium",
+      "title": "Design a distributed cache",
+      "prompt": "Design a distributed in-memory cache (similar to Redis Cluster) that supports GET, SET, and TTL.\n\nAddress: consistent hashing for key distribution, replication for availability, eviction policies (LRU/LFU), and cold-start/cache-warming strategies."
     },
     {
       "id": "beh-001",
@@ -47,6 +143,54 @@
       "difficulty": "medium",
       "title": "Taking ownership of a hard problem",
       "prompt": "Describe a situation where you took ownership of a complex, ambiguous problem that wasn't originally yours to solve.\n\nWhat made it complex? What did you do? What was the result?"
+    },
+    {
+      "id": "beh-003",
+      "modality": "behavioral",
+      "topic": "mentoring",
+      "difficulty": "easy",
+      "title": "Mentoring a junior engineer",
+      "prompt": "Tell me about a time you mentored or coached a junior engineer.\n\nWhat was their struggle? What approach did you take? How did you measure success?"
+    },
+    {
+      "id": "beh-004",
+      "modality": "behavioral",
+      "topic": "failure",
+      "difficulty": "medium",
+      "title": "Learning from a production incident",
+      "prompt": "Describe a production incident you were involved in — either caused by your code or one you helped resolve.\n\nWhat happened? What was your role? What did you change afterward to prevent recurrence?"
+    },
+    {
+      "id": "beh-005",
+      "modality": "behavioral",
+      "topic": "prioritization",
+      "difficulty": "medium",
+      "title": "Managing competing deadlines",
+      "prompt": "Tell me about a time when you had multiple high-priority tasks competing for your attention.\n\nHow did you prioritize? What trade-offs did you make? What would you do differently?"
+    },
+    {
+      "id": "beh-006",
+      "modality": "behavioral",
+      "topic": "collaboration",
+      "difficulty": "medium",
+      "title": "Cross-team collaboration challenge",
+      "prompt": "Describe a project that required working closely with a team outside your own (product, ops, data, another engineering team).\n\nWhat made it difficult? How did you build alignment? What was the outcome?"
+    },
+    {
+      "id": "beh-007",
+      "modality": "behavioral",
+      "topic": "ambiguity",
+      "difficulty": "hard",
+      "title": "Working with unclear requirements",
+      "prompt": "Tell me about a project where the requirements were vague or frequently changing.\n\nHow did you approach the ambiguity? How did you decide when to ask for clarity vs move forward? What was the result?"
+    },
+    {
+      "id": "beh-008",
+      "modality": "behavioral",
+      "topic": "growth",
+      "difficulty": "easy",
+      "title": "Biggest technical growth moment",
+      "prompt": "What is the most significant technical concept or skill you have taught yourself in the last two years?\n\nWhat drove you to learn it? How did you approach the learning? How has it changed your work?"
     }
   ]
 }

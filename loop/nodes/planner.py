@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from loop.config import settings
 from loop.models import get_chat_model
 from loop.observability import get_langfuse_callback
 from loop.schemas import PrepPlan
@@ -101,5 +102,11 @@ def planner(state: dict) -> dict:
         },
         config=config,
     )
+
+    # Hard-cap sessions to settings.max_sessions regardless of what the model suggests.
+    # This keeps demo runs short and costs predictable.
+    cap = settings.max_sessions
+    if len(plan.sessions) > cap:
+        plan = plan.model_copy(update={"sessions": plan.sessions[:cap], "total_sessions": cap})
 
     return {"plan": plan.model_dump()}

@@ -1,0 +1,100 @@
+{
+  "reference_answers": [
+    {
+      "question_id": "cod-001",
+      "reference": "Use a sliding window with a hash set/map tracking characters currently in the window. Advance the right pointer, adding characters; on a duplicate, advance the left pointer until the duplicate is removed. Track the max window size seen. This achieves O(n) time and O(min(n, charset)) space, versus O(n²) or worse for brute force."
+    },
+    {
+      "question_id": "cod-002",
+      "reference": "Use a ReentrantLock with two Condition objects (notFull, notEmpty), or Java's built-in synchronized + wait/notify. put() blocks while the queue is full; get() blocks while empty. Always re-check the condition in a while loop (not if) to handle spurious wakeups. Capacity=1 and interrupt handling are common edge cases to call out."
+    },
+    {
+      "question_id": "cod-003",
+      "reference": "Standard binary search maintains lo/hi pointers and computes mid = lo + (hi - lo) / 2 to avoid overflow, narrowing the range based on comparison with the target. For first/last position, run two modified binary searches: one that keeps searching left after a match (for first), one that keeps searching right (for last). O(log n) time, O(1) space."
+    },
+    {
+      "question_id": "cod-004",
+      "reference": "For a general binary tree, use recursive post-order traversal: if the current node is p, q, or null, return it; otherwise recurse left and right — if both sides return non-null, the current node is the LCA. For a BST, exploit ordering: if both p and q are less than the current node, go left; if both are greater, go right; otherwise the current node is the LCA — this is O(h) instead of O(n)."
+    },
+    {
+      "question_id": "cod-005",
+      "reference": "Greedy (always pick the largest coin) fails for denominations like [1, 3, 4] targeting 6 — greedy picks 4+1+1 (3 coins) but 3+3 is optimal (2 coins). The DP solution builds dp[i] = minimum coins for amount i, using dp[i] = min(dp[i - coin] + 1) over all coins ≤ i, with dp[0] = 0. This is the unbounded knapsack pattern, O(amount × coins) time."
+    },
+    {
+      "question_id": "cod-006",
+      "reference": "BFS uses a queue and explores level by level — ideal for shortest-path-in-unweighted-graph problems. DFS uses a stack (or recursion) and explores depth-first — ideal for cycle detection, topological sort, and backtracking. For connected components, either works: iterate all nodes, run BFS/DFS from each unvisited node, incrementing a counter. For cycle detection in an undirected graph via DFS, skip the edge back to the immediate parent to avoid false positives."
+    },
+    {
+      "question_id": "cod-007",
+      "reference": "Sort intervals by start time, then iterate once: if the current interval's start is ≤ the last merged interval's end, merge by extending the end to max(last.end, current.end); otherwise start a new merged interval. O(n log n) for the sort dominates; the merge pass is O(n). For streaming input, an interval tree or sorted structure with incremental insertion is needed since a full re-sort per element is too slow."
+    },
+    {
+      "question_id": "cod-008",
+      "reference": "Fast power uses divide and conquer: pow(x, n) = pow(x, n/2)² for even n, and x * pow(x, n-1) for odd n, giving O(log n) time versus O(n) for the naive loop. Negative exponents are handled via pow(x, -n) = 1 / pow(x, n), with care for n = INT_MIN overflowing when negated in fixed-width integer types (not an issue in Python's arbitrary-precision integers)."
+    },
+    {
+      "question_id": "sys-001",
+      "reference": "Use a client-generated idempotency key stored in a fast lookup (Redis) to deduplicate retried submissions. Architecture: API gateway → async queue (Kafka) → payment processor → datastore, decoupling ingestion from processing. For consistency, use the outbox pattern or saga to keep the payment state and audit log consistent across services. Partition by merchant_id or account_id to scale horizontally to 10k TPS. An append-only event log provides the audit trail."
+    },
+    {
+      "question_id": "sys-002",
+      "reference": "Token bucket is a common choice: each user has a bucket refilling at a fixed rate; requests consume tokens. Implement the check-and-decrement atomically via a Redis Lua script to avoid race conditions across servers. Compare against sliding window log (more accurate, more memory) and fixed window (simplest, allows bursts at window boundaries). Decide fail-open vs fail-closed behavior for when Redis itself is unavailable."
+    },
+    {
+      "question_id": "sys-003",
+      "reference": "CAP theorem: under a network partition (P, which is unavoidable in a distributed system), you must choose between Consistency (all nodes see the same data) and Availability (every request gets a response). Eventual consistency (e.g. DynamoDB, Cassandra) favors availability — reads may be stale briefly. Linearizability / strong consistency (e.g. Spanner, HBase) favors consistency — some requests may be rejected or delayed during a partition. The choice depends on the domain: financial ledgers often need strong consistency; social feeds tolerate eventual consistency."
+    },
+    {
+      "question_id": "sys-004",
+      "reference": "Use a push-based fan-out: an event bus (Kafka/SNS) publishes to per-channel queues (email, SMS, push), each with its own consumer. For high-fan-out users, batch or shard the delivery to avoid overwhelming a single consumer. Guarantee at-least-once delivery with consumer-side idempotency keys to prevent duplicate notifications. Failed deliveries go through exponential-backoff retries, then a dead-letter queue for manual inspection."
+    },
+    {
+      "question_id": "sys-005",
+      "reference": "Generate short IDs via base62 encoding of an auto-incrementing counter (avoids collisions, no coordination needed with a distributed ID generator like Snowflake) or a hash with a collision-check fallback. Cache hot redirects in Redis or at the CDN edge to keep redirect latency low; use a 302 (not 301) if you need to preserve analytics tracking on each click. For 100M URLs, a single sharded relational or key-value store is sufficient; analytics counters should be aggregated asynchronously via a stream processor, not incremented synchronously on the hot path."
+    },
+    {
+      "question_id": "sys-006",
+      "reference": "Raft leader election: nodes start as followers; if no heartbeat is received within a timeout, a follower becomes a candidate, increments its term, and requests votes. It becomes leader upon receiving votes from a majority. Log replication: the leader appends entries locally, then sends AppendEntries RPCs to followers; an entry is committed once a majority of nodes acknowledge it. If the leader fails mid-replication, uncommitted entries may be lost or overwritten, but committed entries (acknowledged by a majority) are never lost — a new leader is guaranteed to have them in its log."
+    },
+    {
+      "question_id": "sys-007",
+      "reference": "Build an inverted index: for each term, store a posting list of (doc_id, term_frequency, positions). Boolean queries intersect/union posting lists; phrase queries use position data. Rank results with TF-IDF or BM25, which weigh term frequency against document frequency to prioritize relevant, distinctive terms. For real-time updates at scale, use a segment-based design (like Lucene): new documents go into a small in-memory segment that's periodically merged with disk-based segments; deletions are marked with tombstones rather than removed immediately."
+    },
+    {
+      "question_id": "sys-008",
+      "reference": "Use consistent hashing to map keys to nodes on a ring, so adding/removing a node only remaps a fraction (k/n) of keys rather than a full rehash; virtual nodes smooth out load imbalance. Replicate each key to multiple nodes (replication factor ≥ 2) for availability; use quorum reads/writes (R + W > N) to tune the consistency/availability tradeoff. For eviction, LRU approximates recency-based usage; LFU (or a count-min sketch approximation) captures frequency-based usage — pick based on access patterns. Cache warming avoids cold-start latency spikes; probabilistic early expiration prevents thundering-herd cache stampedes."
+    },
+    {
+      "question_id": "beh-001",
+      "reference": "A strong answer follows STAR (Situation, Task, Action, Result), shows principled, data-driven pushback rather than emotional resistance, states the actual outcome honestly (even if they didn't get their way), and explains what they learned from the disagreement — all within about 2-3 minutes."
+    },
+    {
+      "question_id": "beh-002",
+      "reference": "A strong answer describes a genuinely ambiguous or complex situation, demonstrates proactive ownership (they didn't wait to be assigned the problem), and quantifies or clearly describes the positive impact of resolving it. STAR structure keeps the story tight and concrete."
+    },
+    {
+      "question_id": "beh-003",
+      "reference": "A strong answer identifies the mentee's specific struggle precisely (not just 'they needed help'), describes a structured and tailored mentoring approach (pairing, Socratic questioning, regular feedback), and states a measurable or observable improvement — e.g. the mentee later worked independently or took on harder tasks."
+    },
+    {
+      "question_id": "beh-004",
+      "reference": "A strong answer is honest about the candidate's own role in the incident (not deflecting blame), performs genuine root-cause analysis (not just symptom-fixing), and describes a concrete preventive action taken afterward — a new test, monitoring alert, or process change — rather than a vague promise to 'be more careful'."
+    },
+    {
+      "question_id": "beh-005",
+      "reference": "A strong answer uses a principled prioritization framework (impact × urgency, stakeholder alignment) rather than gut feel, proactively communicates tradeoffs to stakeholders instead of silently dropping work, and reflects on what they'd do differently next time (earlier escalation, better scoping)."
+    },
+    {
+      "question_id": "beh-006",
+      "reference": "A strong answer clearly sets the scene (which teams, what the shared goal was, what made it hard), describes concrete alignment-building steps (a shared design doc, joint review, negotiated compromise), and shows empathy for the other team's constraints — not just their own team's perspective."
+    },
+    {
+      "question_id": "beh-007",
+      "reference": "A strong answer describes specific techniques for handling ambiguity (writing down assumptions, decomposing unknowns, time-boxed prototyping), articulates a clear heuristic for when to ask versus proceed (based on risk and reversibility), and reflects honestly on whether the approach worked."
+    },
+    {
+      "question_id": "beh-008",
+      "reference": "A strong answer names a genuinely technical, relevant skill (not something superficial), describes a structured learning process (a side project, primary sources, teaching others), and shows concrete applied impact — a design decision or code review they wouldn't have made before learning it."
+    }
+  ]
+}

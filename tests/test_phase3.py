@@ -188,6 +188,59 @@ class TestInterviewers:
         result = coding_interviewer(state)
         assert result["current_question_id"] is not None
 
+    def test_interviewer_selects_by_focus_not_fixture_order(self, monkeypatch):
+        """Phase 8b: question selection follows current_focus, not fixture position.
+
+        cod-003 ("Binary search and its variants") is NOT first in fixture order
+        (cod-001 is). Setting current_focus to text drawn directly from cod-003's
+        own indexed content should surface cod-003 first, proving the interviewer
+        is ranking by semantic similarity rather than always picking questions[0].
+        """
+        self._stub_interrupt(monkeypatch)
+        from loop.nodes.interviewers import coding_interviewer
+        from loop.tools import get_question_by_id
+
+        target = get_question_by_id("cod-003")
+        # Reconstruct the exact page_content string retrieval.py embeds for cod-003
+        # so DeterministicFakeEmbedding gives it cosine similarity = 1.0.
+        exact_focus = f"{target['title']}. {target['prompt']} Topic: {target['topic']}"
+
+        state = {"answers": [], "current_focus": exact_focus, "current_topics": []}
+        result = coding_interviewer(state)
+        assert result["current_question_id"] == "cod-003"
+
+    def test_interviewer_no_focus_falls_back_to_modality_query(self, monkeypatch):
+        """With no current_focus set, the interviewer still returns a valid
+        question for the requested modality (falls back to modality as the query).
+        """
+        self._stub_interrupt(monkeypatch)
+        from loop.nodes.interviewers import beh_interviewer
+        from loop.tools import get_question_by_id
+
+        result = beh_interviewer({"answers": []})
+        q = get_question_by_id(result["current_question_id"])
+        assert q["modality"] == "behavioral"
+
+    def test_interviewer_skips_answered_even_with_focus_match(self, monkeypatch):
+        """If the top semantic match is already answered, the next-best unanswered
+        question is picked instead — the answered-skip logic still applies under
+        semantic ranking.
+        """
+        self._stub_interrupt(monkeypatch)
+        from loop.nodes.interviewers import coding_interviewer
+        from loop.tools import get_question_by_id
+
+        target = get_question_by_id("cod-003")
+        exact_focus = f"{target['title']}. {target['prompt']} Topic: {target['topic']}"
+
+        state = {
+            "answers": [{"question_id": "cod-003", "text": "already answered"}],
+            "current_focus": exact_focus,
+            "current_topics": [],
+        }
+        result = coding_interviewer(state)
+        assert result["current_question_id"] != "cod-003"
+
 
 # ── Grader ────────────────────────────────────────────────────────────────────
 
@@ -266,6 +319,58 @@ class TestGrader:
         }
         with pytest.raises(ValueError, match="No rubric"):
             grader(state)
+
+    def test_grader_prompt_includes_reference_answer(self, monkeypatch):
+        """Phase 8c: the retrieved reference answer must reach the model prompt.
+
+        Captures the formatted ChatPromptValue passed to the (stubbed) structured
+        model and asserts the known cod-001 reference text appears in it.
+        """
+        from loop.tools import get_reference_answer
+
+        captured = {}
+
+        def _capturing_grader():
+            fake = MagicMock()
+
+            def _capture(prompt_value):
+                captured["prompt_text"] = prompt_value.to_string()
+                return _STUB_GRADE
+
+            fake.with_structured_output.return_value = RunnableLambda(_capture)
+            return fake
+
+        monkeypatch.setattr("loop.nodes.grader.get_chat_model", _capturing_grader)
+
+        from loop.nodes.grader import grader
+
+        state = {
+            "current_question_id": "cod-001",
+            "answers": [{"question_id": "cod-001", "text": "sliding window with a hash set"}],
+            "grades": None,
+        }
+        result = grader(state)
+
+        assert "grades" in result  # grading still completes normally
+        reference_text = get_reference_answer("cod-001")
+        assert reference_text is not None
+        assert reference_text in captured["prompt_text"]
+
+    def test_grader_falls_back_when_no_reference_answer(self, monkeypatch):
+        """A question with no reference_answers.json entry still grades successfully."""
+        monkeypatch.setattr("loop.nodes.grader.get_chat_model", lambda: _make_fake_grader())
+        monkeypatch.setattr("loop.nodes.grader.get_reference_answer", lambda _: None)
+
+        from loop.nodes.grader import grader
+
+        state = {
+            "current_question_id": "cod-001",
+            "answers": [{"question_id": "cod-001", "text": "..."}],
+            "grades": None,
+        }
+        result = grader(state)
+        assert "grades" in result
+        assert len(result["grades"]) == 1
 
 
 # ── Coach ─────────────────────────────────────────────────────────────────────

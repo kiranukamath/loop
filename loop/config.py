@@ -24,9 +24,13 @@ class Settings(BaseSettings):
 
     aws_region: str = "us-east-1"
 
-    # Model ID — must be enabled in your account + region.
+    # Chat model ID — must be enabled in your account + region.
     # Haiku 4.5 is the cheapest current Claude model on Bedrock.
     bedrock_model_id: str = "anthropic.claude-haiku-4-5-20251001-v1:0"
+
+    # Embeddings model ID (Phase 8) — Amazon Titan Embeddings v2.
+    # Produces 1536-dimensional vectors; must be enabled in your account + region.
+    bedrock_embed_model_id: str = "amazon.titan-embed-text-v2:0"
 
     # ── Langfuse (optional — no-op when all three are absent/empty) ─────────
     # All three are required for a self-hosted instance.
@@ -38,6 +42,12 @@ class Settings(BaseSettings):
     # ── Model provider switch (v2 seam) ─────────────────────────────────────
     # "bedrock" is the only implemented provider in v1.
     model_provider: str = "bedrock"
+
+    # ── Session cap ──────────────────────────────────────────────────────────
+    # Maximum number of interview sessions per run.  The planner may suggest
+    # more; this hard-caps the list so the graph never exceeds this many questions.
+    # Override with MAX_SESSIONS=N in .env or the environment.
+    max_sessions: int = 2
 
     # ── Persistence ──────────────────────────────────────────────────────────
     # Path to the SQLite file used by SqliteSaver.  Empty = use MemorySaver

@@ -53,6 +53,162 @@
       ]
     },
     {
+      "question_id": "cod-003",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "correctness",
+          "weight": 4,
+          "description": "Standard binary search is correct. First/last position variants correctly handle duplicates and boundaries."
+        },
+        {
+          "name": "complexity_analysis",
+          "weight": 3,
+          "description": "States O(log n) time, O(1) space. Explains why the loop invariant guarantees termination."
+        },
+        {
+          "name": "edge_cases",
+          "weight": 2,
+          "description": "Handles empty array, single element, target not present, all elements equal to target."
+        },
+        {
+          "name": "communication",
+          "weight": 1,
+          "description": "Walked through the invariant (lo ≤ mid < hi) and why mid = lo + (hi - lo) / 2 avoids overflow."
+        }
+      ]
+    },
+    {
+      "question_id": "cod-004",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "correctness_general",
+          "weight": 4,
+          "description": "General binary tree LCA is correct using recursive post-order traversal. Returns correct node."
+        },
+        {
+          "name": "bst_optimization",
+          "weight": 3,
+          "description": "Correctly leverages BST ordering to traverse left/right without full traversal. Explains why this is O(h) vs O(n)."
+        },
+        {
+          "name": "edge_cases",
+          "weight": 2,
+          "description": "Handles p or q being the root, p being an ancestor of q, nodes not in tree."
+        },
+        {
+          "name": "communication",
+          "weight": 1,
+          "description": "Explained the base case and recursive structure clearly before coding."
+        }
+      ]
+    },
+    {
+      "question_id": "cod-005",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "greedy_analysis",
+          "weight": 3,
+          "description": "Clearly explains why greedy fails (e.g. coins [1,3,4], target 6: greedy picks 4+1+1 but 3+3 is optimal)."
+        },
+        {
+          "name": "dp_correctness",
+          "weight": 4,
+          "description": "DP solution is correct. Recurrence dp[i] = min(dp[i - coin] + 1) for each coin is properly implemented."
+        },
+        {
+          "name": "complexity",
+          "weight": 2,
+          "description": "States O(amount × coins) time and O(amount) space. Recognises this as unbounded knapsack."
+        },
+        {
+          "name": "code_quality",
+          "weight": 1,
+          "description": "Clean implementation with meaningful variable names; handles amount=0 base case."
+        }
+      ]
+    },
+    {
+      "question_id": "cod-006",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "bfs_correctness",
+          "weight": 3,
+          "description": "BFS correctly traverses layer by layer; visited set prevents revisiting; all reachable nodes found."
+        },
+        {
+          "name": "dfs_correctness",
+          "weight": 3,
+          "description": "DFS cycle detection is correct. For undirected graph, ignores the edge back to the parent."
+        },
+        {
+          "name": "tradeoff_analysis",
+          "weight": 3,
+          "description": "Articulates: BFS good for shortest path / layer problems; DFS good for cycle detection / topological sort / backtracking. Stack vs queue."
+        },
+        {
+          "name": "code_quality",
+          "weight": 1,
+          "description": "Clean adjacency-list iteration; no off-by-one in the visited check."
+        }
+      ]
+    },
+    {
+      "question_id": "cod-007",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "correctness",
+          "weight": 4,
+          "description": "Correctly sorts by start, merges overlapping intervals (end = max(end, interval[1])), produces correct output."
+        },
+        {
+          "name": "complexity",
+          "weight": 3,
+          "description": "States O(n log n) for the sort, O(n) for the merge pass. O(n) space for output."
+        },
+        {
+          "name": "edge_cases",
+          "weight": 2,
+          "description": "Handles single interval, non-overlapping list, all intervals overlapping into one."
+        },
+        {
+          "name": "streaming_extension",
+          "weight": 1,
+          "description": "Suggests a reasonable streaming approach: sorted insert + merge window, or interval tree."
+        }
+      ]
+    },
+    {
+      "question_id": "cod-008",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "divide_and_conquer",
+          "weight": 4,
+          "description": "Correctly implements fast exponentiation: pow(x, n//2)² for even n, x * pow(x, n-1) for odd. O(log n) time."
+        },
+        {
+          "name": "negative_exponent",
+          "weight": 3,
+          "description": "Handles negative n correctly: pow(x, -n) = 1 / pow(x, n). Handles n = INT_MIN edge case."
+        },
+        {
+          "name": "overflow_discussion",
+          "weight": 2,
+          "description": "Discusses integer overflow risks for large n in typed languages; explains Python's arbitrary precision."
+        },
+        {
+          "name": "communication",
+          "weight": 1,
+          "description": "Explained the recurrence and why the naive loop is O(n) before presenting the O(log n) solution."
+        }
+      ]
+    },
+    {
       "question_id": "sys-001",
       "max_score": 10,
       "criteria": [
@@ -110,6 +266,162 @@
       ]
     },
     {
+      "question_id": "sys-003",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "cap_theorem_accuracy",
+          "weight": 4,
+          "description": "Correctly states CAP: cannot guarantee C + A + P simultaneously. Explains that P is unavoidable in practice, so choice is C vs A during partition."
+        },
+        {
+          "name": "consistency_models",
+          "weight": 3,
+          "description": "Distinguishes eventual consistency, strong consistency (linearizability), and read-your-writes. Gives concrete database examples (Cassandra, Spanner, DynamoDB)."
+        },
+        {
+          "name": "real_world_examples",
+          "weight": 2,
+          "description": "Cites real systems: Cassandra/DynamoDB as AP, HBase/Spanner as CP. Explains why each chose its trade-off."
+        },
+        {
+          "name": "communication",
+          "weight": 1,
+          "description": "Avoided oversimplification; acknowledged PACELC or the nuances of 'partition tolerance'."
+        }
+      ]
+    },
+    {
+      "question_id": "sys-004",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "fan_out_strategy",
+          "weight": 3,
+          "description": "Addresses fan-out: push model (write to each recipient queue) vs pull model. Handles celebrities/high-fan-out users."
+        },
+        {
+          "name": "delivery_guarantees",
+          "weight": 3,
+          "description": "Explains at-least-once vs exactly-once. Proposes idempotency keys and deduplication for the consumer side."
+        },
+        {
+          "name": "retry_and_dlq",
+          "weight": 2,
+          "description": "Designs retry with exponential backoff and dead-letter queue for failed deliveries. Distinguishes transient vs permanent failures."
+        },
+        {
+          "name": "channel_abstraction",
+          "weight": 2,
+          "description": "Abstracts over email/SMS/push behind a channel interface so new channels are addable without changing the core dispatcher."
+        }
+      ]
+    },
+    {
+      "question_id": "sys-005",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "id_generation",
+          "weight": 3,
+          "description": "Proposes a collision-free ID strategy: base62 encoding of a counter, hash + collision check, or distributed ID service. Discusses length vs collision probability."
+        },
+        {
+          "name": "redirect_latency",
+          "weight": 3,
+          "description": "Achieves low-latency redirects: CDN edge caching, in-memory cache (Redis) in front of DB, 301 vs 302 trade-off for browser caching."
+        },
+        {
+          "name": "storage_estimation",
+          "weight": 2,
+          "description": "Back-of-envelope: 100M URLs × ~500 bytes ≈ 50 GB — correctly argues this fits in a single DB. Discusses partitioning for write scale."
+        },
+        {
+          "name": "analytics",
+          "weight": 2,
+          "description": "Proposes async click counting (Kafka → batch aggregation) rather than synchronous increment to avoid latency on the hot path."
+        }
+      ]
+    },
+    {
+      "question_id": "sys-006",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "leader_election",
+          "weight": 4,
+          "description": "Correctly walks through Raft leader election: term increment, RequestVote RPC, majority quorum, split vote resolution."
+        },
+        {
+          "name": "log_replication",
+          "weight": 3,
+          "description": "Correctly describes AppendEntries RPC, commit only after majority ACK, follower catching up via log replay."
+        },
+        {
+          "name": "failure_handling",
+          "weight": 2,
+          "description": "Explains what happens on leader failure mid-replication: uncommitted entries are safe to replay; committed entries are never lost."
+        },
+        {
+          "name": "communication",
+          "weight": 1,
+          "description": "Used concrete term numbers and node counts (e.g. 5-node cluster, quorum = 3) to illustrate."
+        }
+      ]
+    },
+    {
+      "question_id": "sys-007",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "inverted_index",
+          "weight": 4,
+          "description": "Correctly describes inverted index: term → posting list (doc_id, term_freq, positions). Explains how Boolean and phrase queries use it."
+        },
+        {
+          "name": "ranking",
+          "weight": 3,
+          "description": "Explains TF-IDF or BM25 scoring. Distinguishes recall (find all relevant) from precision (rank them correctly)."
+        },
+        {
+          "name": "real_time_updates",
+          "weight": 2,
+          "description": "Proposes segment-based indexing (Lucene model): write to in-memory segment, periodically merge/flush. Handles deletes via tombstones."
+        },
+        {
+          "name": "scale",
+          "weight": 1,
+          "description": "Addresses 1B docs: index sharding by term hash or doc range, distributed query fan-out and merge."
+        }
+      ]
+    },
+    {
+      "question_id": "sys-008",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "consistent_hashing",
+          "weight": 3,
+          "description": "Correctly explains consistent hashing ring: keys map to nodes, adding/removing a node only remaps O(k/n) keys. Virtual nodes for load balance."
+        },
+        {
+          "name": "replication",
+          "weight": 3,
+          "description": "Proposes replication factor ≥ 2; explains read/write quorums (R + W > N) for tunable consistency."
+        },
+        {
+          "name": "eviction_policy",
+          "weight": 2,
+          "description": "Compares LRU (recency) vs LFU (frequency). Explains approximations (segmented LRU, count-min sketch for LFU) needed at scale."
+        },
+        {
+          "name": "cold_start",
+          "weight": 2,
+          "description": "Addresses cache warming: background loader at startup, lazy population, or thundering-herd protection (probabilistic early expiration)."
+        }
+      ]
+    },
+    {
       "question_id": "beh-001",
       "max_score": 10,
       "criteria": [
@@ -158,6 +470,162 @@
           "name": "conciseness",
           "weight": 2,
           "description": "Crisp storytelling — sets up the situation quickly, focuses on their actions."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-003",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "diagnosis",
+          "weight": 3,
+          "description": "Clearly identifies the junior's specific struggle (knowledge gap, confidence, process) rather than vague 'they needed help'."
+        },
+        {
+          "name": "mentoring_approach",
+          "weight": 3,
+          "description": "Describes a structured approach: Socratic questioning, pairing, code review feedback, or regular 1:1s. Tailored to the person."
+        },
+        {
+          "name": "outcome",
+          "weight": 2,
+          "description": "States a measurable or observable improvement: junior shipped independently, took on harder tasks, or became a resource for others."
+        },
+        {
+          "name": "empathy",
+          "weight": 2,
+          "description": "Demonstrates psychological safety: made it okay to ask questions; didn't make the junior feel judged."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-004",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "incident_clarity",
+          "weight": 2,
+          "description": "Describes the incident concisely: what failed, customer impact, detection time, resolution time."
+        },
+        {
+          "name": "personal_role",
+          "weight": 3,
+          "description": "Is honest about their own contribution (even if partial). Doesn't deflect blame entirely to others or tools."
+        },
+        {
+          "name": "root_cause_analysis",
+          "weight": 3,
+          "description": "Identifies root cause (not just symptom). Mentions 5-whys or post-mortem process."
+        },
+        {
+          "name": "prevention",
+          "weight": 2,
+          "description": "Describes concrete preventive action taken: test added, monitoring alert, process change, feature flag. Not just 'we were more careful'."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-005",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "prioritization_framework",
+          "weight": 3,
+          "description": "Uses a principled framework: impact × urgency, stakeholder alignment, or explicit trade-off discussion — not just gut feel."
+        },
+        {
+          "name": "communication",
+          "weight": 3,
+          "description": "Proactively communicated trade-offs to stakeholders rather than silently dropping work. Negotiated deadlines where possible."
+        },
+        {
+          "name": "outcome",
+          "weight": 2,
+          "description": "States what was delivered, what was deferred, and whether the outcome was acceptable."
+        },
+        {
+          "name": "reflection",
+          "weight": 2,
+          "description": "Identifies what they'd do differently: earlier escalation, better scoping, more conservative estimation."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-006",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "context",
+          "weight": 2,
+          "description": "Clearly sets the scene: which teams, what the shared goal was, and what made collaboration difficult."
+        },
+        {
+          "name": "alignment_strategy",
+          "weight": 4,
+          "description": "Describes concrete steps to build alignment: shared doc/RFC, joint design review, compromise on interface, or escalation path."
+        },
+        {
+          "name": "outcome",
+          "weight": 2,
+          "description": "Project shipped or decision was made. States what they learned about cross-team dynamics."
+        },
+        {
+          "name": "empathy_and_listening",
+          "weight": 2,
+          "description": "Acknowledges the other team's constraints and perspective, not just their own team's view."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-007",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "ambiguity_handling",
+          "weight": 4,
+          "description": "Describes specific techniques: wrote down assumptions, decomposed unknowns, built a prototype to reduce risk, or time-boxed exploration."
+        },
+        {
+          "name": "ask_vs_proceed",
+          "weight": 3,
+          "description": "Articulates a clear heuristic for when to ask vs move forward (e.g. risk level, reversibility, time cost of asking)."
+        },
+        {
+          "name": "outcome",
+          "weight": 2,
+          "description": "States whether the approach worked and what they'd adjust if requirements shifted again."
+        },
+        {
+          "name": "communication",
+          "weight": 1,
+          "description": "Kept stakeholders informed of assumptions so surprises were minimised."
+        }
+      ]
+    },
+    {
+      "question_id": "beh-008",
+      "max_score": 10,
+      "criteria": [
+        {
+          "name": "relevance",
+          "weight": 3,
+          "description": "The skill or concept is genuinely technical and relevant to senior backend work — not superficial."
+        },
+        {
+          "name": "learning_process",
+          "weight": 3,
+          "description": "Describes a structured approach: side project, reading primary sources, pair-programming, or teaching others."
+        },
+        {
+          "name": "applied_impact",
+          "weight": 3,
+          "description": "Shows how the new skill changed real work: a design decision, a PR they wouldn't have written before, or a problem they now see differently."
+        },
+        {
+          "name": "motivation",
+          "weight": 1,
+          "description": "Explains what drove the learning — curiosity, a painful incident, or a career goal — not just 'it was required'."
         }
       ]
     }

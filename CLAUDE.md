@@ -11,8 +11,13 @@ mock interviews (coding / system design / behavioral), grades answers against ru
 remembers weak areas across sessions, and adapts the next session. A human approves the
 prep plan and the final "ready / not ready" readiness verdict.
 
-The project exists to exercise the **five agent capabilities**, one emphasized per phase:
-**Planning, Orchestration, Memory, HITL (human-in-the-loop), Eval.**
+The project exists to exercise the **five core agent capabilities**, one emphasized per phase:
+**Planning, Orchestration, Memory, HITL (human-in-the-loop), Eval.** Those are Phases 0–7 (v1,
+complete). A second **"production track" (Phases 8–11)** extends Loop into the skills that turn a
+LangGraph demo into production-grade agentic AI: **Retrieval / RAG (8), dynamic tool-calling /
+ReAct (9), production hardening — resilience, safety, cost (10), and Session History UI —
+checkpoint replay + observability (11).** Same contract, same laptop-offline test gate (see
+`PLAN.md` for the detailed, self-contained phase specs).
 
 ## Working contract (NON-NEGOTIABLE — this is a learning project)
 
@@ -46,14 +51,24 @@ If the owner says "go deeper" or "why" — expand the explanation before continu
 - **Model:** default to **AWS Bedrock** via `langchain-aws` `ChatBedrockConverse`, behind a
   **swappable model factory** (`loop/models.py`). Ollama swap is **v2** — wire the seam
   now (factory + config), do NOT implement Ollama yet.
+- **Embeddings (Phase 8):** **AWS Bedrock** Titan via `langchain-aws` `BedrockEmbeddings`,
+  behind a **factory** (`loop/embeddings.py`) that mirrors `models.py`. Vector store is
+  `InMemoryVectorStore` (rebuilt from fixtures at startup); pgvector is **v2**.
+- **Web search (Phase 9):** behind a **swappable provider seam** (`loop/research/search.py`) —
+  keyless default or Tavily-when-keyed. This is the one place v1 reaches real external data.
 - **v1 uses static fixtures** in `fixtures/` (canned questions, rubrics, sample JD+profile).
-  The goal is the agentic flow, not data plumbing.
-- **Keep tool interfaces stable** so v2 can swap backends (Postgres, real question bank,
-  Ollama) without touching the graph.
+  The goal is the agentic flow, not data plumbing. Phase 8 adds *semantic retrieval over those
+  same fixtures* — still no external DB.
+- **Keep all factory/tool/seam interfaces stable** so v2 can swap backends (Postgres, pgvector,
+  real question bank, Ollama) without touching the graph.
+- **Laptop test gate is absolute:** every capability must be testable offline — stub the model,
+  use `DeterministicFakeEmbedding` for retrieval, stub the search tool. No network in `tests/`.
 
-### Explicitly v2 / out of scope for v1
-Real data sources, Postgres checkpointer/store, Ollama model, richer/dynamic question bank.
-Do not build these in v1 unless the owner re-scopes.
+### Explicitly v2 / out of scope (even after the Phase 8–11 track)
+Postgres checkpointer/store, **pgvector** (behind the Phase 8 seam), Ollama model, live JD
+ingest + a large external question bank. Do not build these unless the owner re-scopes.
+Note: "real question bank" and "real web search" are *partially* addressed by Phases 8–9
+(semantic retrieval over fixtures; a real search seam) — full external data stores stay v2.
 
 ## Repo layout (target — built incrementally, not all at once)
 
@@ -77,9 +92,19 @@ loop/
       interviewers.py     # Phase 3 (coding / system-design / behavioral)
       grader.py           # Phase 3
       coach.py            # Phase 3 (feedback)
+      readiness.py        # Phase 5 (readiness verdict + HITL gate)
+      research.py         # Phase 9 (ReAct company-research sub-agent)
     schemas.py            # Pydantic models for structured output (PrepPlan, Grade, ...)
     memory.py             # checkpointer + store wiring (Phase 4)
     tools.py              # question-bank / rubric tools over fixtures (stable interface)
+    api.py                # FastAPI backend: /sessions, /resume, /stream + history (Phase 7 + 11)
+    static/index.html     # single-page Tailwind UI (Phase 7)
+    static/sessions.html  # session history + detail page (Phase 11)
+    embeddings.py         # swappable embeddings factory -> BedrockEmbeddings (Phase 8)
+    retrieval.py          # InMemoryVectorStore index + semantic question retrieval (Phase 8)
+    research/             # web-search seam + @tool wrappers for the ReAct agent (Phase 9)
+    guardrails.py         # PII redaction + prompt-injection detection (Phase 10)
+    budget.py             # token/cost accountant + per-session ceiling (Phase 10)
   fixtures/               # static JD, profile, questions, rubrics (Phase 0)
   evals/                  # Langfuse datasets + eval scripts (Phase 6)
   tests/                  # pytest, mirrors loop/

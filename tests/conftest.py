@@ -14,6 +14,7 @@ Why we patch loop.graph.grader / loop.graph.coach (not the module functions):
 """
 
 import pytest
+from langchain_core.embeddings.fake import DeterministicFakeEmbedding
 from langchain_core.runnables import RunnableLambda
 from langgraph.types import Command
 
@@ -52,6 +53,27 @@ _STUB_FEEDBACK = Feedback(
     action_items=["practice sliding-window edge cases"],
     weak_areas_update=["sliding-window", "communication"],
 )
+
+
+@pytest.fixture(autouse=True)
+def stub_embeddings(monkeypatch):
+    """Global offline gate for Phase 8 (retrieval): every test uses
+    DeterministicFakeEmbedding instead of BedrockEmbeddings.
+
+    Interviewer nodes now call search_questions() -> retrieve_questions(), which
+    calls get_embeddings() internally.  Without this fixture, ANY test that runs
+    a real interviewer node (test_hitl.py, test_multisession.py, test_api.py, ...)
+    would attempt a live Bedrock call.  Runs for every test, not just test_retrieval.py.
+    """
+    import loop.retrieval as retrieval_mod
+
+    monkeypatch.setattr(
+        "loop.retrieval.get_embeddings",
+        lambda: DeterministicFakeEmbedding(size=256),
+    )
+    retrieval_mod._build_index()
+    yield
+    retrieval_mod._vector_store = None
 
 
 @pytest.fixture(autouse=True)
