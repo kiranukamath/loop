@@ -25,7 +25,7 @@ completes.
 | 8 | Retrieval / RAG | semantic search & grounding | ✅ done & approved (8a, 8b, 8c) | — |
 | 9 | Tool-use research agent | dynamic tool-calling (ReAct) | ✅ done & approved (9a, 9b) | — |
 | 10 | Production hardening | resilience, safety, cost | ✅ done & approved (10a, 10b, 10c) | — |
-| 11 | Session history UI | reading checkpoint state / replay | ⬜ not started | — |
+| 11 | Session history UI | reading checkpoint state / replay | ✅ done & approved (11a, 11b) | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
 
@@ -75,6 +75,27 @@ as a LangChain callback at the top-level `graph.stream()` call in `api.py`
 regardless of which node made it, so no grader/planner/coach/readiness code
 needed to change for cost tracking. `BudgetExceeded` is caught in `api.py`'s
 SSE generator and surfaces as a `{"type": "error"}` event instead of a raw 500.
+
+**Phase 11 complete ✅ (242 tests, 0 lint errors). Phase 11 is fully done. All 12 phases (0–11) are now complete.**
+`GET /sessions` queries the SqliteSaver's `checkpoints` table directly for
+`(thread_id, MAX(checkpoint_id))` — `checkpoint_id` is a time-sortable UUID6,
+so `MAX()` gives the latest checkpoint per thread without a separate
+timestamp column (verified by inspecting a live SqliteSaver's schema: no `ts`
+column exists on `checkpoints`, but `StateSnapshot.created_at` does, read via
+`graph.get_state(config)` per thread for the actual ISO timestamp shown in
+the UI). Returns `{"sessions": [], "persistence": "none"}` on MemorySaver
+(matches the dev-box default when `DB_PATH` is unset) — no durable history
+exists to list. `GET /sessions/{id}/history` reads only the newest
+`get_state_history()` snapshot (LangGraph merges every node's delta into the
+full state, so the final snapshot already has everything). Simplification
+vs. the original PLAN sample: `sessions[]` omits a per-session
+`weak_areas_after` breakdown (would require replaying every snapshot, not
+just the final one) — the detail response instead exposes one top-level
+`weak_areas` (the final accumulated list). `loop/static/sessions.html` is a
+vanilla-JS list/detail page (same dark Tailwind theme as `index.html`);
+manually verified in-browser against the real `db/loop_state.sqlite` file
+from an earlier phase's demo run — list view, detail view (plan card, graded
+Q&A card with score bar, gaps), and back-navigation all render correctly.
 
 **Phase 8c complete ✅ (178 tests, 0 lint errors). Phase 8 is fully done.**
 `fixtures/reference_answers.json` (24 short model answers, one per question) + `get_reference_answer()`

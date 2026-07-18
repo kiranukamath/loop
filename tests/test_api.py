@@ -293,3 +293,84 @@ class TestStreamEndpoint:
         ipt2 = next(e for e in events2 if e.get("type") == "interrupt")
         assert ipt1["action"] == "approve_plan"
         assert ipt2["action"] == "approve_plan"
+
+
+# ── GET /sessions (Phase 11a) ─────────────────────────────────────────────────
+
+
+class TestListSessions:
+    def test_memorysaver_backend_returns_empty_with_none_persistence(self, client):
+        """The `client` fixture wires a fresh MemorySaver — no durable history."""
+        resp = client.get("/sessions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"sessions": [], "persistence": "none"}
+
+    def test_sqlite_backend_lists_completed_session(self, client, monkeypatch, tmp_path):
+        """A SqliteSaver-backed graph shows up in the listing after a full run."""
+        import sqlite3
+
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        import loop.api as api_mod
+        from loop.graph import build_graph
+
+        conn = sqlite3.connect(str(tmp_path / "sessions.sqlite"), check_same_thread=False)
+        saver = SqliteSaver(conn)
+        saver.setup()
+        sqlite_graph = build_graph().compile(checkpointer=saver)
+        monkeypatch.setattr(api_mod, "_graph", sqlite_graph)
+
+        tid = "sqlite-thread-1"
+        config = {"configurable": {"thread_id": tid}}
+        from loop.state import initial_state
+
+        result = sqlite_graph.invoke(initial_state(), config=config)
+        assert "__interrupt__" in result  # plan_approval gate
+        sqlite_graph.invoke({"decision": "approve"}, config=config)
+
+        resp = client.get("/sessions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["persistence"] == "sqlite"
+        thread_ids = {s["thread_id"] for s in data["sessions"]}
+        assert tid in thread_ids
+
+    def test_unknown_action_returns_422_still_works_alongside(self, client):
+        """Sanity: adding /sessions didn't disturb the existing resume validation."""
+        tid = client.post("/sessions").json()["thread_id"]
+        resp = client.post(f"/sessions/{tid}/resume", json={"action": "teleport"})
+        assert resp.status_code == 422
+
+
+# ── GET /sessions/{thread_id}/history (Phase 11a) ─────────────────────────────
+
+
+class TestSessionHistory:
+    def test_unknown_thread_id_returns_404(self, client):
+        resp = client.get("/sessions/nonexistent-thread/history")
+        assert resp.status_code == 404
+
+    def test_returns_plan_and_verdict_after_full_run(self, client):
+        """Full flow through both gates, then fetch the history for that thread."""
+        tid, events1 = TestStreamEndpoint()._start(client)
+
+        client.post(
+            f"/sessions/{tid}/resume", json={"action": "approve_plan", "decision": "approve"}
+        )
+        client.get(f"/sessions/{tid}/stream")  # runs interviewer→grader→coach→readiness
+
+        client.post(
+            f"/sessions/{tid}/resume", json={"action": "approve_verdict", "decision": "approve"}
+        )
+        client.get(f"/sessions/{tid}/stream")  # reaches END
+
+        resp = client.get(f"/sessions/{tid}/history")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["thread_id"] == tid
+        assert data["plan"]["total_sessions"] == 1
+        assert len(data["sessions"]) == 1
+        assert data["sessions"][0]["question_id"] == "cod-001"
+        assert data["sessions"][0]["grade"]["score"] == 7
+        assert data["readiness_verdict"]["verdict"] == "ready"

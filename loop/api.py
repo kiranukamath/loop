@@ -25,6 +25,20 @@ Endpoints
         approve_verdict: {"action": "approve_verdict", "decision": "approve"|"override",
                           "verdict": "ready"|"not_ready"}
 
+  GET  /sessions   (Phase 11a)
+      List every past session, newest first. Reads the checkpointer directly —
+      no separate "sessions" table is maintained.
+        {"sessions": [{"thread_id", "started_at", "verdict", "sessions_completed"}, ...],
+         "persistence": "sqlite" | "none"}
+      "none" (with an empty list) when running on MemorySaver — it holds no
+      durable history once the process exits, so there is nothing to list.
+
+  GET  /sessions/{thread_id}/history   (Phase 11a)
+      Full structured interview timeline for one session, read from the FINAL
+      checkpoint snapshot (LangGraph merges each node's delta into the full
+      state, so the last snapshot already has everything — no replay needed).
+      404 if the thread_id has no checkpoint.
+
 Analogy (Spring):
   compile_graph_with_memory() ≈ ApplicationContext.getBean(Graph)
   GET /stream                 ≈ SseEmitter — one per segment, closed after interrupt/done
@@ -300,3 +314,110 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
             "X-Accel-Buffering": "no",  # disable nginx buffering
         },
     )
+
+
+# ── Phase 11a: session history ────────────────────────────────────────────────
+
+
+def _sqlite_conn():
+    """Return the underlying sqlite3.Connection if _graph is SqliteSaver-backed.
+
+    None means MemorySaver (or any other non-SQLite checkpointer) — no durable
+    thread listing is possible, since LangGraph itself has no "list all
+    threads" API; we query the checkpointer's own storage directly.
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    checkpointer = _graph.checkpointer
+    if isinstance(checkpointer, SqliteSaver):
+        return checkpointer.conn
+    return None
+
+
+@app.get("/sessions")
+def list_sessions() -> dict:
+    """List every past session, newest first (Phase 11a).
+
+    MemorySaver holds no durable history once the process exits, so we return
+    an empty list with persistence="none" rather than pretending to have data.
+    """
+    conn = _sqlite_conn()
+    if conn is None:
+        return {"sessions": [], "persistence": "none"}
+
+    # checkpoint_id is a time-sortable UUID6 — MAX() per thread_id gives the
+    # most recent checkpoint without needing a separate timestamp column.
+    rows = conn.execute(
+        "SELECT thread_id, MAX(checkpoint_id) AS latest FROM checkpoints "
+        "WHERE checkpoint_ns = '' GROUP BY thread_id ORDER BY latest DESC"
+    ).fetchall()
+
+    sessions = []
+    for thread_id, _latest in rows:
+        snapshot = _graph.get_state({"configurable": {"thread_id": thread_id}})
+        values = snapshot.values or {}
+        plan = values.get("plan") or {}
+        verdict = values.get("readiness_verdict") or {}
+        sessions.append(
+            {
+                "thread_id": thread_id,
+                "started_at": snapshot.created_at,
+                "verdict": verdict.get("verdict"),
+                "sessions_completed": values.get("session_index", 0),
+                "total_sessions": plan.get("total_sessions"),
+            }
+        )
+    return {"sessions": sessions, "persistence": "sqlite"}
+
+
+@app.get("/sessions/{thread_id}/history")
+def get_session_history(thread_id: str) -> dict:
+    """Full structured interview timeline for one session (Phase 11a).
+
+    Reads only the FINAL checkpoint snapshot — get_state_history() yields
+    snapshots newest-first, and the newest one already holds the fully
+    accumulated state (every node's delta merged in), so there is no need to
+    replay the whole history to reconstruct it.
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+    history = _graph.get_state_history(config)
+    snapshot = next(history, None)
+
+    if snapshot is None or not snapshot.values:
+        raise HTTPException(status_code=404, detail=f"No session found for thread_id={thread_id!r}")
+
+    values = snapshot.values
+    plan = values.get("plan") or {}
+    answers = {a["question_id"]: a for a in (values.get("answers") or [])}
+    grades = {g["question_id"]: g for g in (values.get("grades") or [])}
+
+    from loop.tools import get_question_by_id
+
+    sessions = []
+    for question_id, grade in grades.items():
+        question = get_question_by_id(question_id) or {}
+        answer = answers.get(question_id) or {}
+        sessions.append(
+            {
+                "question_id": question_id,
+                "question_title": question.get("title"),
+                "question_prompt": question.get("prompt"),
+                "answer": answer.get("text"),
+                "grade": grade,
+            }
+        )
+
+    return {
+        "thread_id": thread_id,
+        "started_at": snapshot.created_at,
+        "plan": {
+            "role_summary": plan.get("role_summary"),
+            "total_sessions": plan.get("total_sessions"),
+            "key_gaps": plan.get("key_gaps", []),
+        }
+        if plan
+        else None,
+        "sessions": sessions,
+        "weak_areas": values.get("weak_areas") or [],
+        "readiness_verdict": values.get("readiness_verdict"),
+    }

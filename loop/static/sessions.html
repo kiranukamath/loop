@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loop — Session History</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { brand: '#6366f1' } } }
+    }
+  </script>
+  <style>
+    .score-bar-fill { transition: width 0.3s ease-out; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans antialiased">
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">L</div>
+    <span class="font-semibold text-lg tracking-tight">Loop</span>
+    <span class="text-gray-500 text-sm">Session History</span>
+  </div>
+  <a href="/static/index.html" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Back to interview</a>
+</header>
+
+<main class="max-w-4xl mx-auto px-4 py-10 flex flex-col gap-6">
+
+  <!-- ── List view ──────────────────────────────────────────────────────── -->
+  <section id="view-list" class="flex flex-col gap-4">
+    <h1 class="text-2xl font-bold text-white tracking-tight">Past sessions</h1>
+
+    <div id="persistence-notice" class="hidden bg-amber-950 border border-amber-800 rounded-xl p-4 text-sm text-amber-300">
+      ⚠ Running on in-memory storage — session history is not durable across restarts.
+      Set <code class="bg-black/30 px-1 rounded">DB_PATH</code> to a file to enable history.
+    </div>
+
+    <div id="empty-state" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-500">
+      No past sessions yet. Complete an interview to see it here.
+    </div>
+
+    <div id="session-list" class="flex flex-col gap-3"></div>
+  </section>
+
+  <!-- ── Detail view ────────────────────────────────────────────────────── -->
+  <section id="view-detail" class="hidden flex flex-col gap-6">
+    <button id="btn-back-to-list" class="text-sm text-gray-400 hover:text-gray-200 transition-colors self-start">← Back to sessions</button>
+
+    <div id="detail-plan" class="bg-gray-900 border border-gray-800 rounded-xl p-6"></div>
+    <div id="detail-sessions" class="flex flex-col gap-4"></div>
+    <div id="detail-verdict" class="bg-gray-900 border border-gray-800 rounded-xl p-6"></div>
+  </section>
+
+  <div id="panel-error" class="hidden bg-red-950 border border-red-800 rounded-xl p-4 text-sm text-red-300"></div>
+
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function showError(msg) {
+  const el = $('panel-error');
+  el.textContent = '⚠ ' + msg;
+  el.classList.remove('hidden');
+}
+
+function verdictBadge(verdict) {
+  if (verdict === 'ready') return '<span class="bg-emerald-950 text-emerald-400 text-xs font-medium px-2.5 py-1 rounded-full">Ready</span>';
+  if (verdict === 'not_ready') return '<span class="bg-amber-950 text-amber-400 text-xs font-medium px-2.5 py-1 rounded-full">Not ready</span>';
+  return '<span class="bg-gray-800 text-gray-400 text-xs font-medium px-2.5 py-1 rounded-full">Incomplete</span>';
+}
+
+function formatDate(iso) {
+  if (!iso) return 'Unknown time';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+// ── List view ────────────────────────────────────────────────────────────────
+async function loadSessions() {
+  try {
+    const r = await fetch('/sessions');
+    if (!r.ok) { showError(`Failed to load sessions: ${r.status}`); return; }
+    const data = await r.json();
+
+    $('persistence-notice').classList.toggle('hidden', data.persistence !== 'none');
+    $('empty-state').classList.toggle('hidden', data.sessions.length > 0);
+
+    const list = $('session-list');
+    list.innerHTML = '';
+    data.sessions.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center justify-between hover:border-gray-700 transition-colors';
+      row.innerHTML = `
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center gap-3">
+            ${verdictBadge(s.verdict)}
+            <span class="text-sm text-gray-400">${formatDate(s.started_at)}</span>
+          </div>
+          <div class="text-xs text-gray-500">
+            ${s.sessions_completed ?? 0} of ${s.total_sessions ?? '?'} sessions completed
+          </div>
+        </div>
+        <button data-thread-id="${s.thread_id}" class="btn-view-details bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg px-4 py-2 text-sm transition-colors">
+          View details
+        </button>`;
+      list.appendChild(row);
+    });
+
+    document.querySelectorAll('.btn-view-details').forEach(btn => {
+      btn.addEventListener('click', () => loadDetail(btn.dataset.threadId));
+    });
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+// ── Detail view ──────────────────────────────────────────────────────────────
+async function loadDetail(threadId) {
+  try {
+    const r = await fetch(`/sessions/${threadId}/history`);
+    if (!r.ok) { showError(`Failed to load session: ${r.status}`); return; }
+    const data = await r.json();
+    renderDetail(data);
+    $('view-list').classList.add('hidden');
+    $('view-detail').classList.remove('hidden');
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function renderDetail(data) {
+  const plan = data.plan || {};
+  $('detail-plan').innerHTML = `
+    <h2 class="font-semibold text-white text-lg mb-2">Prep plan</h2>
+    <p class="text-sm text-gray-300 mb-2">${plan.role_summary || 'No plan summary available.'}</p>
+    <div class="text-xs text-gray-500">
+      ${plan.total_sessions || '?'} sessions planned ·
+      Key gaps: ${(plan.key_gaps || []).join(', ') || 'none'}
+    </div>`;
+
+  const sessionsEl = $('detail-sessions');
+  sessionsEl.innerHTML = '';
+  (data.sessions || []).forEach(s => {
+    const grade = s.grade || {};
+    const score = grade.score ?? 0;
+    const pct = Math.min(100, Math.max(0, score * 10));
+    const card = document.createElement('div');
+    card.className = 'bg-gray-900 border border-gray-800 rounded-xl p-5 flex flex-col gap-3';
+    card.innerHTML = `
+      <div class="flex items-center justify-between">
+        <span class="font-medium text-white">${s.question_title || s.question_id}</span>
+        <span class="text-sm text-gray-400">${score}/10</span>
+      </div>
+      <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+        <div class="score-bar-fill h-full bg-indigo-500" style="width: ${pct}%"></div>
+      </div>
+      <details class="text-sm text-gray-400">
+        <summary class="cursor-pointer text-gray-300">Question &amp; your answer</summary>
+        <p class="mt-2 whitespace-pre-wrap">${s.question_prompt || ''}</p>
+        <p class="mt-2 italic whitespace-pre-wrap">${s.answer || ''}</p>
+      </details>
+      ${(grade.strengths || []).length ? `<div class="text-xs text-emerald-400">Strengths: ${grade.strengths.join(', ')}</div>` : ''}
+      ${(grade.improvements || []).length ? `<div class="text-xs text-amber-400">Improve: ${grade.improvements.join(', ')}</div>` : ''}
+      ${grade.overall_feedback ? `<p class="text-xs text-gray-500 border-t border-gray-800 pt-2">${grade.overall_feedback}</p>` : ''}`;
+    sessionsEl.appendChild(card);
+  });
+
+  const v = data.readiness_verdict;
+  if (v) {
+    const verdictColor = v.verdict === 'ready' ? 'text-emerald-400' : 'text-amber-400';
+    $('detail-verdict').innerHTML = `
+      <h2 class="font-semibold text-white text-lg mb-2">Readiness verdict</h2>
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-2xl font-bold ${verdictColor}">${(v.verdict || '?').toUpperCase()}</span>
+        <span class="text-gray-400 text-xs">Confidence: ${v.confidence != null ? Math.round(v.confidence * 100) + '%' : '?'}</span>
+      </div>
+      ${(v.gaps || []).length ? `<div class="text-sm text-gray-300">Gaps: ${v.gaps.join(', ')}</div>` : ''}
+      ${v.recommendation ? `<p class="text-sm text-gray-400 italic border-t border-gray-800 pt-2 mt-2">${v.recommendation}</p>` : ''}`;
+  } else {
+    $('detail-verdict').innerHTML = `
+      <h2 class="font-semibold text-white text-lg mb-2">Readiness verdict</h2>
+      <p class="text-sm text-gray-500">This session has not reached a readiness verdict yet.</p>`;
+  }
+}
+
+$('btn-back-to-list').addEventListener('click', () => {
+  $('view-detail').classList.add('hidden');
+  $('view-list').classList.remove('hidden');
+  loadSessions();
+});
+
+loadSessions();
+</script>
+</body>
+</html>
