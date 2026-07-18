@@ -48,6 +48,7 @@ from fastapi.staticfiles import StaticFiles
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from loop.budget import BudgetCallbackHandler, BudgetExceeded, SessionBudget
 from loop.graph import compile_graph_with_memory
 from loop.state import initial_state
 
@@ -77,6 +78,10 @@ _graph = compile_graph_with_memory()
 # the SQLite checkpoint survives but the pending-command dict is lost.  v2 fix:
 # store pending commands in Redis or a DB table.
 _pending: dict[str, Command | None] = {}
+
+# Phase 10c — per-session token/cost accountant, keyed by thread_id.
+# Same lifecycle caveat as _pending: process-local, lost on restart.
+_budgets: dict[str, SessionBudget] = {}
 
 
 # ── Request / response models ──────────────────────────────────────────────────
@@ -170,6 +175,10 @@ def _safe_payload(updates: dict) -> dict:
             "confidence": v.get("confidence"),
             "gaps": (v.get("gaps") or [])[:3],
         }
+    # Phase 10b: surface any guardrail flags raised by this node (e.g. a
+    # suspected prompt-injection attempt in the JD or an answer).
+    if updates.get("flagged_inputs"):
+        out["flagged_inputs"] = updates["flagged_inputs"]
     return out
 
 
@@ -221,7 +230,16 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
     """
 
     def generate() -> Iterator[str]:
-        config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+        # Phase 10c: one SessionBudget per thread_id, reused across every
+        # segment of the same session so tokens accumulate for the whole
+        # interview, not just one SSE stream call.
+        budget = _budgets.setdefault(thread_id, SessionBudget())
+        budget_cb = BudgetCallbackHandler(budget)
+
+        config = {
+            "configurable": {"thread_id": thread_id, "user_id": user_id},
+            "callbacks": [budget_cb],
+        }
 
         # Determine what to feed to graph.stream()
         cmd = _pending.pop(thread_id, None)
@@ -232,25 +250,47 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
             # cmd is a Command — resume from checkpoint
             stream_input = cmd
 
-        # stream_mode="updates" → yields {node_name: state_delta} after every node.
-        # When interrupt() is called, LangGraph emits {"__interrupt__": (...,)} instead.
-        for chunk in _graph.stream(stream_input, config=config, stream_mode="updates"):
-            for node, updates in chunk.items():
-                if node == "__interrupt__":
-                    # updates is a tuple of Interrupt objects
-                    for ipt in updates:
-                        yield _sse({"type": "interrupt", **ipt.value})
-                    return  # close stream after interrupt
+        try:
+            # stream_mode="updates" → yields {node_name: state_delta} after every node.
+            # When interrupt() is called, LangGraph emits {"__interrupt__": (...,)} instead.
+            for chunk in _graph.stream(stream_input, config=config, stream_mode="updates"):
+                for node, updates in chunk.items():
+                    if node == "__interrupt__":
+                        # updates is a tuple of Interrupt objects
+                        for ipt in updates:
+                            yield _sse({"type": "interrupt", **ipt.value})
+                        return  # close stream after interrupt
 
-                if node.startswith("__"):
-                    continue  # skip internal LangGraph nodes
+                    if node.startswith("__"):
+                        continue  # skip internal LangGraph nodes
 
-                payload = {"type": "node", "node": node}
-                payload.update(_safe_payload(updates))
-                yield _sse(payload)
+                    payload = {"type": "node", "node": node}
+                    payload.update(_safe_payload(updates))
+                    payload["tokens_used"] = budget.tokens_used
+                    payload["cost_usd"] = round(budget.cost_usd, 6)
+                    yield _sse(payload)
+        except BudgetExceeded as exc:
+            # Stop the session gracefully — the browser sees a clear message
+            # instead of a raw 500 / stack trace.
+            yield _sse(
+                {
+                    "type": "error",
+                    "reason": "budget_exceeded",
+                    "message": str(exc),
+                    "tokens_used": budget.tokens_used,
+                    "cost_usd": round(budget.cost_usd, 6),
+                }
+            )
+            return
 
         # Graph reached END without an interrupt
-        yield _sse({"type": "done"})
+        yield _sse(
+            {
+                "type": "done",
+                "tokens_used": budget.tokens_used,
+                "cost_usd": round(budget.cost_usd, 6),
+            }
+        )
 
     return StreamingResponse(
         generate(),

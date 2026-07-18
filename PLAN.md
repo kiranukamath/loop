@@ -24,7 +24,7 @@ completes.
 | 7 | Make it usable (web UI) | streaming + real HITL + durable state | ✅ done & approved | — |
 | 8 | Retrieval / RAG | semantic search & grounding | ✅ done & approved (8a, 8b, 8c) | — |
 | 9 | Tool-use research agent | dynamic tool-calling (ReAct) | ✅ done & approved (9a, 9b) | — |
-| 10 | Production hardening | resilience, safety, cost | ⬜ not started | — |
+| 10 | Production hardening | resilience, safety, cost | ✅ done & approved (10a, 10b, 10c) | — |
 | 11 | Session history UI | reading checkpoint state / replay | ⬜ not started | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
@@ -57,6 +57,24 @@ by default — the demo runner (`main()`) opts in explicitly from `fixtures/samp
 so no existing test or flow was affected by adding the new node. `planner.py` now folds
 `company_research` into its prompt via `_format_company_research()`, with a clear placeholder when
 absent.
+
+**Phase 10 complete ✅ (237 tests, 0 lint errors). Phase 10 is fully done.**
+`loop/models.py::with_resilience()` wraps the *already-built* structured-output
+chain (`prompt | model.with_structured_output(Schema)`) with `.with_fallbacks()`
+then `.with_retry()` — deviation from the PLAN's literal "wrap the returned
+model" wording: verified on installed `langchain-core==1.4.7` that
+`model.with_retry()` returns a `RunnableRetry` which does NOT proxy
+`.with_structured_output()` (checked via `hasattr`), so retry/fallback must
+wrap the *chain*, not the bare model, or every structured-output node breaks.
+`loop/guardrails.py` (`redact_pii`, `detect_injection`) wired into `intake()`
+(JD/profile) and the interviewer answer gate; flags surface via
+`state["flagged_inputs"]` (new `_append_list`-reduced field) and the SSE
+payload. `loop/budget.py` (`SessionBudget`, `BudgetCallbackHandler`) hooks in
+as a LangChain callback at the top-level `graph.stream()` call in `api.py`
+(NOT inside any node) — `on_llm_end` sees every model call's `usage_metadata`
+regardless of which node made it, so no grader/planner/coach/readiness code
+needed to change for cost tracking. `BudgetExceeded` is caught in `api.py`'s
+SSE generator and surfaces as a `{"type": "error"}` event instead of a raw 500.
 
 **Phase 8c complete ✅ (178 tests, 0 lint errors). Phase 8 is fully done.**
 `fixtures/reference_answers.json` (24 short model answers, one per question) + `get_reference_answer()`

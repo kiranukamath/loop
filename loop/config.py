@@ -65,6 +65,21 @@ class Settings(BaseSettings):
     # loops.  Passed as LangGraph's recursion_limit when invoking the agent.
     research_max_iterations: int = 6
 
+    # ── Resilience (Phase 10a) ────────────────────────────────────────────────
+    # Max attempts (including the first) before a model call gives up.
+    # LangChain's Runnable.with_retry() backs off exponentially between attempts —
+    # same idea as Resilience4j's Retry decorator around a flaky downstream call.
+    retry_max_attempts: int = 3
+
+    # Optional fallback model id, tried only if every retry against the primary
+    # model fails. Empty = no fallback (raise the original error after retries).
+    fallback_model_id: str = ""
+
+    # ── Cost & token budget (Phase 10c) ───────────────────────────────────────
+    # Hard ceiling on total tokens (input + output) per session. 0 = unlimited.
+    # Enforced by loop/budget.py via a callback attached to each graph run.
+    max_session_tokens: int = 50_000
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -74,3 +89,12 @@ class Settings(BaseSettings):
 
 # Module-level singleton — import this everywhere instead of constructing Settings().
 settings = Settings()
+
+# USD per 1,000 tokens, as (input_price, output_price) — used by loop/budget.py
+# to price a model call's usage. Extend this when adding a new bedrock_model_id
+# or fallback_model_id. Prices are illustrative estimates, not live AWS pricing —
+# do not treat cost_usd as billing-accurate without checking current Bedrock rates.
+MODEL_PRICES_PER_1K: dict[str, tuple[float, float]] = {
+    "anthropic.claude-haiku-4-5-20251001-v1:0": (0.001, 0.005),
+    "anthropic.claude-sonnet-5-20251101-v1:0": (0.003, 0.015),
+}

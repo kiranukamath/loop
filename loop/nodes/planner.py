@@ -20,7 +20,7 @@ from __future__ import annotations
 from langchain_core.prompts import ChatPromptTemplate
 
 from loop.config import settings
-from loop.models import get_chat_model
+from loop.models import get_chat_model, with_resilience
 from loop.observability import get_langfuse_callback
 from loop.schemas import PrepPlan
 
@@ -114,6 +114,14 @@ def planner(state: dict) -> dict:
     model = get_chat_model()
     structured_model = model.with_structured_output(PrepPlan)
     chain = _PROMPT | structured_model
+
+    # Phase 10a: retry the primary model; fall back to a secondary model (if
+    # configured) after retries are exhausted.
+    fallback_chain = None
+    if settings.fallback_model_id:
+        fallback_model = get_chat_model(settings.fallback_model_id)
+        fallback_chain = _PROMPT | fallback_model.with_structured_output(PrepPlan)
+    chain = with_resilience(chain, fallback_chain)
 
     cb = get_langfuse_callback()
     config = {"callbacks": [cb]} if cb else {}

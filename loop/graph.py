@@ -34,6 +34,7 @@ import pathlib
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from loop.guardrails import detect_injection, redact_pii
 from loop.nodes.coach import coach
 from loop.nodes.grader import grader
 from loop.nodes.interviewers import beh_interviewer, coding_interviewer, sd_interviewer
@@ -57,10 +58,22 @@ def intake(state: dict) -> dict:
     This keeps every existing flow (and every test that doesn't care about
     Phase 9) routing straight to the planner, unaffected by the new research
     node. See main() below for how the demo opts in via fixtures/sample_company.txt.
+
+    Phase 10b: jd/profile are untrusted input (today they're static fixtures,
+    but this is the seam where a real JD upload would land) — redact PII
+    before it ever reaches a prompt, and flag (not block) suspected
+    prompt-injection attempts so the human can see what was caught.
     """
-    jd = (_FIXTURES / "sample_jd.md").read_text()
-    profile = (_FIXTURES / "sample_profile.md").read_text()
-    return {"jd": jd, "profile": profile}
+    jd = redact_pii((_FIXTURES / "sample_jd.md").read_text())
+    profile = redact_pii((_FIXTURES / "sample_profile.md").read_text())
+
+    flagged = []
+    if detect_injection(jd):
+        flagged.append({"source": "jd", "reason": "prompt_injection_pattern"})
+    if detect_injection(profile):
+        flagged.append({"source": "profile", "reason": "prompt_injection_pattern"})
+
+    return {"jd": jd, "profile": profile, "flagged_inputs": flagged}
 
 
 def _route_after_intake(state: dict) -> str:

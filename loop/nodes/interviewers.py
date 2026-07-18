@@ -18,6 +18,7 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
 
+from loop.guardrails import detect_injection, redact_pii
 from loop.tools import get_questions_by_modality, search_questions
 
 
@@ -62,12 +63,21 @@ def _ask_question(state: dict, modality: str) -> dict:
         }
     )
 
+    # Phase 10b: the candidate's answer is untrusted input — redact PII before
+    # it's stored or sent to the grader, and flag (not block) suspected
+    # prompt-injection attempts against the grader's system prompt.
+    flagged = []
+    if detect_injection(answer_text):
+        flagged.append({"source": f"answer:{question['id']}", "reason": "prompt_injection_pattern"})
+    answer_text = redact_pii(answer_text)
+
     ai_msg = AIMessage(content=f"**{question['title']}**\n\n{question['prompt']}")
     human_msg = HumanMessage(content=answer_text)
     return {
         "current_question_id": question["id"],
         "messages": [ai_msg, human_msg],  # add_messages reducer appends
         "answers": [{"question_id": question["id"], "text": answer_text}],
+        "flagged_inputs": flagged,
     }
 
 

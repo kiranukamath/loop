@@ -85,7 +85,7 @@ class TestModelFactory:
 
         # NOW patch — after reloads, so the patch survives into get_chat_model().
         fake_model = MagicMock(spec=BaseChatModel)
-        monkeypatch.setattr("loop.models._make_bedrock_model", lambda: fake_model)
+        monkeypatch.setattr("loop.models._make_bedrock_model", lambda model_id: fake_model)
 
         from loop.models import get_chat_model
 

@@ -78,6 +78,12 @@ class LoopState(dict):
     # ── Phase 7+ (multi-session loop) ────────────────────────────────────────
     session_index: Optional[int]  # index into plan["sessions"]; starts at 0
 
+    # ── Phase 10b (guardrails) ────────────────────────────────────────────────
+    # Accumulates across the whole session (reducer: append), one entry per
+    # piece of input that tripped detect_injection(). Empty/None = nothing
+    # flagged. See loop/guardrails.py.
+    flagged_inputs: Annotated[Optional[list[dict]], _append_list]
+
 
 def initial_state() -> dict:
     """Return a blank starting state with safe defaults for all optional fields.
@@ -105,4 +111,5 @@ def initial_state() -> dict:
         "readiness_verdict": None,
         "verdict_approved": None,
         "session_index": 0,
+        "flagged_inputs": None,
     }
