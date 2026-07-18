@@ -7,6 +7,12 @@ Reads jd + profile + weak_areas from:
 
 Both sources are merged and passed to the model.  If no store is wired or the
 node is called outside a graph context, it falls back to state-only weak areas.
+
+Phase 9b: also reads state["company_research"] (populated by the research node
+when a target company was set) and folds it into the prompt, so the plan can
+be grounded in real company signal — e.g. "focus more on distributed systems
+since this company's interview format emphasises system design."  Absent when
+no company was set; the prompt says so plainly rather than guessing.
 """
 
 from __future__ import annotations
@@ -23,7 +29,9 @@ from loop.schemas import PrepPlan
 _SYSTEM = """You are an expert technical-interview coach.
 Given a job description and a candidate profile, produce a structured prep plan.
 Be specific: name real topics (e.g. "sliding window", "outbox pattern", "STAR format").
-Tailor the plan to the gap between the JD requirements and the candidate's current skills."""
+Tailor the plan to the gap between the JD requirements and the candidate's current skills.
+If company research is provided, use it to ground the plan in that company's actual
+interview format and focus areas."""
 
 _HUMAN = """## Job Description
 {jd}
@@ -34,9 +42,33 @@ _HUMAN = """## Job Description
 ## Known Weak Areas (from previous sessions — empty on first session)
 {weak_areas}
 
+## Company Research
+{company_research}
+
 Produce a PrepPlan for this candidate."""
 
 _PROMPT = ChatPromptTemplate.from_messages([("system", _SYSTEM), ("human", _HUMAN)])
+
+_NO_COMPANY_RESEARCH_TEXT = "(no company research available — no target company was set)"
+
+
+def _format_company_research(company_research: dict | None) -> str:
+    """Render a CompanyResearch dict into readable prompt text.
+
+    Returns a clear placeholder when no research was performed, rather than
+    an empty string that could read as "researched and found nothing."
+    """
+    if not company_research:
+        return _NO_COMPANY_RESEARCH_TEXT
+
+    lines = [
+        f"Company: {company_research.get('company', '')}",
+        f"Interview format: {company_research.get('interview_format', '')}",
+        f"Focus areas: {', '.join(company_research.get('focus_areas', []))}",
+        f"Tech stack: {', '.join(company_research.get('tech_stack', []))}",
+        f"Recent news: {', '.join(company_research.get('recent_news', []))}",
+    ]
+    return "\n".join(lines)
 
 
 # ── Store helper ──────────────────────────────────────────────────────────────
@@ -99,6 +131,7 @@ def planner(state: dict) -> dict:
             "jd": state["jd"],
             "profile": state["profile"],
             "weak_areas": weak_areas_str,
+            "company_research": _format_company_research(state.get("company_research")),
         },
         config=config,
     )

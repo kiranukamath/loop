@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     # Set to a real path (e.g. "loop_state.sqlite") for durable persistence.
     db_path: str = ""
 
+    # ── Web search seam (Phase 9) ─────────────────────────────────────────────
+    # Keyless DuckDuckGo (via `ddgs`) is the v1 default — no signup required.
+    # Setting TAVILY_API_KEY switches to Tavily automatically (v2 — not yet
+    # implemented; see loop/research/search.py for the seam).
+    tavily_api_key: str = ""
+
+    # Iteration bound for the ReAct research agent — prevents runaway tool-call
+    # loops.  Passed as LangGraph's recursion_limit when invoking the agent.
+    research_max_iterations: int = 6
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -250,4 +250,5 @@ class TestGraphWithPlanner:
         # total_sessions is capped at settings.max_sessions (default 2);
         # the fake plan starts at 4 but the planner node trims it.
         from loop.config import settings as _s
+
         assert result["plan"]["total_sessions"] <= _s.max_sessions

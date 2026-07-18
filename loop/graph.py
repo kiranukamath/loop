@@ -2,7 +2,10 @@
 Graph assembly — Phase 5: interview loop + orchestration + memory + HITL.
 
 Full topology:
-  START → intake → planner → plan_approval [INTERRUPT] → session_router
+  START → intake ─[conditional on state["company"]]─►
+            research (if company set) → planner
+            planner                    (if no company)
+          → plan_approval [INTERRUPT] → session_router
     ─[conditional on current_modality]─►
       coding_interviewer  ─┐
       sd_interviewer       ├─► grader → coach → advance_session
@@ -15,6 +18,13 @@ Phase 7a additions:
   - advance_session node: increments session_index after each session
   - _route_after_session: loop back to session_router or proceed to readiness
   - session_router: now uses session_index to pick the right session (was always [0])
+
+Phase 9b addition:
+  - research node: a ReAct sub-agent (ONLY dynamic-control-flow node in the graph)
+  - _route_after_intake: conditional edge — research only runs if state["company"] is set
+  - intake() itself does NOT set company by default; the demo runner (main()) sets it
+    explicitly from fixtures/sample_company.txt so all existing offline flows/tests
+    are unaffected unless a company is deliberately provided.
 
 Run with:  uv run python -m loop.graph
 """
@@ -29,6 +39,7 @@ from loop.nodes.grader import grader
 from loop.nodes.interviewers import beh_interviewer, coding_interviewer, sd_interviewer
 from loop.nodes.planner import planner
 from loop.nodes.readiness import readiness
+from loop.nodes.research import research
 from loop.observability import get_langfuse_callback
 from loop.state import LoopState, initial_state
 
@@ -39,10 +50,27 @@ _FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
 def intake(state: dict) -> dict:
-    """Load JD and profile text from fixtures into state."""
+    """Load JD and profile text from fixtures into state.
+
+    Does NOT set state["company"] — company stays None (the initial_state()
+    default) unless a caller sets it explicitly before invoking the graph.
+    This keeps every existing flow (and every test that doesn't care about
+    Phase 9) routing straight to the planner, unaffected by the new research
+    node. See main() below for how the demo opts in via fixtures/sample_company.txt.
+    """
     jd = (_FIXTURES / "sample_jd.md").read_text()
     profile = (_FIXTURES / "sample_profile.md").read_text()
     return {"jd": jd, "profile": profile}
+
+
+def _route_after_intake(state: dict) -> str:
+    """Return 'research' if a target company is set, else 'planner'.
+
+    This is the ONLY place a fixed workflow branches purely on whether Phase 9
+    data is present — every other routing function (e.g. _route_by_modality)
+    branches on data the graph itself always produces.
+    """
+    return "research" if state.get("company") else "planner"
 
 
 # ── Session router node ───────────────────────────────────────────────────────
@@ -169,6 +197,7 @@ def build_graph() -> StateGraph:
 
     # Register all nodes
     graph.add_node("intake", intake)
+    graph.add_node("research", research)  # Phase 9b — ReAct sub-agent, conditional
     graph.add_node("planner", planner)
     graph.add_node("plan_approval", plan_approval)  # HITL gate 1
     graph.add_node("session_router", session_router)
@@ -180,11 +209,18 @@ def build_graph() -> StateGraph:
     graph.add_node("advance_session", advance_session)
     graph.add_node("readiness", readiness)  # HITL gate 2
 
-    # Fixed edges: START → intake → planner → plan_approval
+    # Fixed edges: START → intake → [conditional] → plan_approval
     # plan_approval has NO static outgoing edge — it always returns Command(goto=...)
     # so routing is determined entirely by the human's decision at runtime.
     graph.add_edge(START, "intake")
-    graph.add_edge("intake", "planner")
+
+    # Conditional edge: intake → research (if company set) or straight to planner.
+    graph.add_conditional_edges(
+        "intake",
+        _route_after_intake,
+        path_map={"research": "research", "planner": "planner"},
+    )
+    graph.add_edge("research", "planner")
     graph.add_edge("planner", "plan_approval")
 
     # Conditional edge: session_router → one of the three interviewers
@@ -299,7 +335,7 @@ _CANNED_ANSWERS = [
 ]
 
 
-def _run_session_with_hitl(user_id: str, thread_id: str) -> dict:
+def _run_session_with_hitl(user_id: str, thread_id: str, company: str | None = None) -> dict:
     """Run one full graph session through both HITL gates and return final result.
 
     The graph pauses twice:
@@ -308,12 +344,18 @@ def _run_session_with_hitl(user_id: str, thread_id: str) -> dict:
 
     This runner auto-approves both gates (demo mode).
     In a real UI the human would inspect the payloads and respond interactively.
+
+    Phase 9b: pass company="Stripe" (or any name) to opt into the ReAct research
+    node — this is a LIVE network + Bedrock demo, not part of the offline test
+    gate. Leave company=None (default) to skip research entirely, exactly like
+    every pre-Phase-9 session.
     """
     cb = get_langfuse_callback()
     callbacks = [cb] if cb else []
 
     state = initial_state()
     state["answers"] = list(_CANNED_ANSWERS)
+    state["company"] = company
 
     config = {
         "configurable": {"thread_id": thread_id, "user_id": user_id},
@@ -400,6 +442,17 @@ def main() -> None:
     rv2 = r2.get("readiness_verdict") or {}
     print(f"  Readiness:       {rv2.get('verdict', 'n/a')}")
     print(f"  Weak areas:      {r2.get('weak_areas')}")
+
+    # ── Session 3 — Phase 9b: ReAct research demo (LIVE network + Bedrock) ──
+    print("\n[ SESSION 3 — company research (Phase 9b demo) ]\n")
+    company = (_FIXTURES / "sample_company.txt").read_text().strip()
+    r3 = _run_session_with_hitl(user_id="kiran", thread_id="loop-s3", company=company)
+
+    cr = r3.get("company_research") or {}
+    print(f"\n  Company:          {cr.get('company', 'n/a')}")
+    print(f"  Interview format: {cr.get('interview_format', 'n/a')}")
+    print(f"  Focus areas:      {cr.get('focus_areas', [])}")
+    print(f"  Sources:          {cr.get('sources', [])[:2]}")
 
     print("\nPhase 5 run complete.")
 

@@ -103,6 +103,29 @@ class Feedback(BaseModel):
 # ── Phase 5: HITL ─────────────────────────────────────────────────────────────
 
 
+class CompanyResearch(BaseModel):
+    """Output of the Phase 9 ReAct research sub-agent.
+
+    Grounds the planner in real signal about the target company instead of
+    training-time guesses.  Populated only when state["company"] is set.
+    """
+
+    company: str = Field(description="The company name researched")
+    interview_format: str = Field(
+        description="What is known about this company's interview process/format"
+    )
+    focus_areas: list[str] = Field(
+        description="Technical or behavioral areas this company is known to emphasise"
+    )
+    tech_stack: list[str] = Field(
+        description="Technologies this company is known to use, if discoverable"
+    )
+    recent_news: list[str] = Field(
+        description="Recent, relevant news or blog posts about the company"
+    )
+    sources: list[str] = Field(description="URLs the research is grounded in")
+
+
 class ReadinessVerdict(BaseModel):
     """Readiness node output — overall interview readiness after a session.
 

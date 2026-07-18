@@ -43,6 +43,10 @@ class LoopState(dict):
     # ── Input (set by intake, never changed) ────────────────────────────────
     jd: str  # job description text
     profile: str  # candidate profile text
+    company: Optional[str]  # target company name — set by intake, Phase 9
+
+    # ── Phase 9 (tool-calling research agent) ────────────────────────────────
+    company_research: Optional[dict]  # CompanyResearch.model_dump(), or None if skipped
 
     # ── Conversation messages (reducer: append, not overwrite) ───────────────
     # Annotated[list[BaseMessage], add_messages] tells LangGraph to call
@@ -85,6 +89,8 @@ def initial_state() -> dict:
     return {
         "jd": "",
         "profile": "",
+        "company": None,
+        "company_research": None,
         "messages": [],
         "plan": None,
         "current_modality": None,

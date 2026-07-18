@@ -43,6 +43,7 @@ class TestGraphStructure:
         g = build_graph()
         for name in (
             "intake",
+            "research",
             "planner",
             "session_router",
             "coding_interviewer",

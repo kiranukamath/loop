@@ -23,7 +23,7 @@ completes.
 | 6 | Eval & observability | agent evaluation | ✅ done & approved | — |
 | 7 | Make it usable (web UI) | streaming + real HITL + durable state | ✅ done & approved | — |
 | 8 | Retrieval / RAG | semantic search & grounding | ✅ done & approved (8a, 8b, 8c) | — |
-| 9 | Tool-use research agent | dynamic tool-calling (ReAct) | ⬜ not started | — |
+| 9 | Tool-use research agent | dynamic tool-calling (ReAct) | ✅ done & approved (9a, 9b) | — |
 | 10 | Production hardening | resilience, safety, cost | ⬜ not started | — |
 | 11 | Session history UI | reading checkpoint state / replay | ⬜ not started | — |
 
@@ -40,6 +40,23 @@ Embeddings seam (`loop/embeddings.py`) + InMemoryVectorStore retrieval module (`
 similarity to `session.focus`/`topics` (via `current_focus`/`current_topics` in state, set by
 `session_router`) instead of fixture order. Global `stub_embeddings` autouse fixture added to
 `tests/conftest.py` so every test — not just `test_retrieval.py` — stays offline.
+
+**Phase 9a complete ✅ (189 tests, 0 lint errors).**
+Search seam (`loop/research/search.py`, `ddgs` keyless provider, Tavily v2 seam) + `@tool`
+wrapper (`loop/research/tools.py::search_web`) + `CompanyResearch` schema + `company`/
+`company_research` state fields + `fixtures/sample_company.txt`. **Deviation from the original
+plan text:** using `langchain.agents.create_agent` in 9b instead of the PLAN-specified
+`langgraph.prebuilt.create_react_agent`, which is now deprecated in the installed
+`langgraph-prebuilt==1.1.0` — verified per CLAUDE.md rule #7.
+
+**Phase 9b complete ✅ (202 tests, 0 lint errors). Phase 9 is fully done.**
+`loop/nodes/research.py` — the ReAct research node, wired conditionally after `intake` via
+`_route_after_intake` (research only runs if `state["company"]` is set; otherwise routes straight
+to `planner`, exactly like every pre-Phase-9 flow). `intake()` deliberately does NOT set `company`
+by default — the demo runner (`main()`) opts in explicitly from `fixtures/sample_company.txt` —
+so no existing test or flow was affected by adding the new node. `planner.py` now folds
+`company_research` into its prompt via `_format_company_research()`, with a clear placeholder when
+absent.
 
 **Phase 8c complete ✅ (178 tests, 0 lint errors). Phase 8 is fully done.**
 `fixtures/reference_answers.json` (24 short model answers, one per question) + `get_reference_answer()`
@@ -815,6 +832,70 @@ factory seam; covers index build, top-k constraint, modality filter correctness,
   The exact-match retrieval test reconstructs the document's `page_content` string precisely to exploit this.
 - `BedrockEmbeddings` all credential fields are `Optional` — boto3 credential chain picks up
   `AWS_BEARER_TOKEN_BEDROCK` automatically, same as `ChatBedrockConverse`.
+
+### Phase 9a — 2026-07-06
+**Built:** `loop/config.py` — `tavily_api_key` (empty = keyless DuckDuckGo default) and
+`research_max_iterations` (agent iteration bound). `loop/research/search.py::web_search(query, k)`
+— provider-switch seam mirroring `models.py`/`embeddings.py`; `_duckduckgo_search` via `ddgs`
+(the maintained successor to `duckduckgo-search`), `_tavily_search` raises `NotImplementedError`
+as a deliberate v2 seam. `loop/research/tools.py::search_web` — `@tool`-wrapped, formats results
+as readable text for the model. `loop/schemas.py::CompanyResearch`. `loop/state.py` — `company`
+and `company_research` fields + `initial_state()` update. `fixtures/sample_company.txt` ("Stripe").
+`pyproject.toml` — added `ddgs>=9.14.4` via `uv add`. `tests/test_research.py` — 11 offline tests;
+stubs `ddgs.DDGS` directly (never touches the network) plus dedicated tests for the Tavily seam,
+the tool wrapper, schema validity, and state defaults. 189/189 tests, 0 lint errors.
+
+**Key decisions / lessons:**
+- **Deviated from PLAN.md's literal text:** the plan specified `langgraph.prebuilt.create_react_agent`,
+  but the installed `langgraph-prebuilt==1.1.0` docstring flags it as deprecated in favor of
+  `langchain.agents.create_agent` (present in the already-installed `langchain==1.3.9`). Verified
+  both signatures directly (`inspect.signature` + `help()`) before choosing — `create_agent`'s
+  `response_format=` writes to `state["structured_response"]`, an equivalent mechanism. This is
+  exactly the scenario CLAUDE.md rule #7 anticipates: plans go stale against fast-moving libraries;
+  verify installed APIs, don't trust memorized or previously-written text.
+- `duckduckgo-search` was renamed to `ddgs` on PyPI — installing the old name would have pulled a
+  deprecated package. Confirmed `DDGS().text(query, max_results=k)` with a live call before locking
+  in the interface (dev environment has network access; the laptop test gate does not need it).
+- The web search seam is the ONE place in the whole v1 project that reaches live external data —
+  same "server activity, not laptop test gate" treatment as live Bedrock calls. Tests stub `ddgs.DDGS`
+  itself, not just `web_search`, to prove the seam's internals are also correctly wired.
+- Tavily gets the identical "seam exists, raises NotImplementedError" treatment as the Ollama model
+  provider in `models.py` — consistent v2-seam pattern across the whole codebase.
+
+### Phase 9b — 2026-07-06
+**Built:** `loop/nodes/research.py::research(state)` — builds a `create_agent` ReAct sub-agent
+(model + `search_web` tool + `response_format=CompanyResearch`), invokes it with
+`recursion_limit=settings.research_max_iterations`, and returns
+`{"company_research": CompanyResearch.model_dump()}` from `result["structured_response"]`.
+`loop/graph.py` — `research` node registered; `_route_after_intake(state)` conditional edge
+(`"research"` if `state["company"]` truthy, else `"planner"`); `research → planner` fixed edge;
+`intake()` unchanged (still never sets `company`). `_run_session_with_hitl()` gained an optional
+`company` param; `main()` demonstrates a third session with `company` read from
+`fixtures/sample_company.txt` ("Stripe") to exercise the research path live. `loop/nodes/planner.py`
+— `_format_company_research()` helper + new `{company_research}` prompt section, with
+`_NO_COMPANY_RESEARCH_TEXT` placeholder when absent. 13 new tests in `tests/test_research.py`
+(routing, node internals via a stubbed `create_agent`, iteration-bound assertion, tool-registration
+assertion, planner prompt-capture tests) + `research` added to `test_graph.py`'s node-registration
+assertion. 202/202 tests, 0 lint errors. **Phase 9 (Tool-calling research agent) is now fully
+complete — 9a, 9b.**
+
+**Key decisions / lessons:**
+- **The offline-safety design is the main lesson of this sub-step:** rather than have `intake()`
+  set `company` from a fixture (which would make EVERY existing test — `test_hitl.py`,
+  `test_multisession.py`, `test_api.py`, `test_evals.py` — silently attempt a real ReAct/Bedrock/
+  network call the moment the conditional edge was added), `company` stays `None` by default from
+  `initial_state()`, and only the demo runner opts in explicitly. This meant zero of the ~30
+  pre-existing tests needed new stubs for the research node — verified by running the full suite
+  immediately after wiring the graph, before writing a single new test.
+- Testing a real ReAct tool-calling loop offline would require a fake chat model that emits
+  tool-call messages in sequence — disproportionate effort for testing OUR wiring code rather than
+  `create_agent`'s internals (a well-tested library function, not our code). Instead, `create_agent`
+  itself is monkeypatched to return a minimal fake object with just `.invoke(input, config)`,
+  which is enough to verify: the tool list passed in, the message content built from `company`,
+  and the `recursion_limit` propagated from config — the actual contract our node is responsible for.
+- `create_agent`'s `response_format=<PydanticModel>` writes the validated instance to
+  `result["structured_response"]` — confirmed via `typing.get_type_hints(AgentState)` on the
+  installed `langchain==1.3.9`, not from memory.
 
 ### Phase 8c — 2026-06-29
 **Built:** `fixtures/reference_answers.json` — one short reference/model answer per question
