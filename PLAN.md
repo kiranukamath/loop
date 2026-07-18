@@ -849,6 +849,70 @@ thread listing; shaping a nested JSON response in FastAPI; vanilla JS `fetch` + 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
 
+### Phase 11a+11b — 2026-07-18
+**Built:** `loop/api.py` — `GET /sessions` (lists past sessions, newest first) and
+`GET /sessions/{thread_id}/history` (full structured interview timeline for one session).
+`loop/static/sessions.html` — list + detail view, same dark Tailwind theme as `index.html`;
+`index.html` gained a "📋 History" header link. `tests/test_api.py` — 5 new tests (242/242
+total, 0 lint errors).
+
+**Key decisions / lessons:**
+- LangGraph has **no built-in "list every thread" API** — a checkpointer only knows
+  save/load for a thread_id you already have. `GET /sessions` queries the `SqliteSaver`'s
+  own `checkpoints` table directly: `SELECT thread_id, MAX(checkpoint_id) ... GROUP BY
+  thread_id`. `checkpoint_id` turned out to be a time-sortable UUID6 (verified by
+  inspecting a live checkpoint row), so plain string `MAX()` gives the latest checkpoint
+  per thread — no separate timestamp column needed for ordering. The actual ISO
+  timestamp shown in the UI comes from `StateSnapshot.created_at` via `graph.get_state()`.
+- `GET /sessions/{id}/history` reads only the **newest** `get_state_history()` snapshot —
+  each node returns a delta, but the checkpoint stores the *merged* state, so the last
+  snapshot already has every accumulated `answer`/`grade`/`weak_area` from the whole run.
+  No need to replay the full history.
+- Returns `{"sessions": [], "persistence": "none"}` on `MemorySaver` (the dev-box default
+  when `DB_PATH` is unset) rather than a bare empty list — an honest signal, not a silent
+  "no sessions yet."
+- **Simplification vs. the PLAN.md sample:** dropped the per-session `weak_areas_after`
+  breakdown (would require replaying every snapshot, not just the final one) in favor of
+  one top-level `weak_areas` field on the detail response.
+- Manually verified in-browser against the real `db/loop_state.sqlite` left over from an
+  earlier phase's demo run — list view, detail view, and back-navigation all confirmed
+  working with real (not synthetic) session data.
+- Full write-up: [`doc/phase-11-session-history.md`](../doc/phase-11-session-history.md).
+
+### Phase 10a+10b+10c — 2026-07-18
+**Built:** `loop/models.py` — `with_resilience(chain, fallback_chain)` (retry + optional
+fallback wrapped around a *finished* structured-output chain); `get_chat_model(model_id=None)`
+gained a model-id override. `loop/guardrails.py` — `redact_pii()` + `detect_injection()`,
+wired into `intake()` (JD/profile) and the interviewer answer gate; new `state["flagged_inputs"]`
+field. `loop/budget.py` — `SessionBudget` + `BudgetCallbackHandler`, attached as a LangChain
+callback at the top-level `graph.stream()` call in `api.py`; enforces `max_session_tokens`,
+surfaces `tokens_used`/`cost_usd` in the SSE payload, stops a session gracefully on breach.
+`loop/config.py` — `retry_max_attempts`, `fallback_model_id`, `max_session_tokens`,
+`MODEL_PRICES_PER_1K`. `tests/test_models.py`, `tests/test_guardrails.py`, `tests/test_budget.py`
+— 35 new tests (237/237 total at end of Phase 10, 0 lint errors).
+
+**Key decisions / lessons:**
+- **Deviated from PLAN.md's literal text** ("wrap the returned model with `.with_retry()`/
+  `.with_fallbacks()`"). Verified directly against the installed `langchain-core==1.4.7`:
+  `model.with_retry()` returns a `RunnableRetry` that does **not** proxy
+  `.with_structured_output()` through to the wrapped model (`hasattr(..., "with_structured_output")`
+  is `False`). Every node needs `.with_structured_output()`, so resilience must wrap the
+  *finished chain* (`prompt | model.with_structured_output(Schema)`), not the bare model —
+  going the other direction silently breaks every structured-output node.
+- Guardrails **flag, not block**, suspected prompt injection — a human is already in the
+  loop downstream (grader, plan approval, readiness gate), so flagging preserves the
+  "model proposes, human disposes" contract instead of risking a false-positive silently
+  dropping a legitimate answer.
+- Budget tracking is a **LangChain callback (`on_llm_end`)** attached once at the
+  `api.py` graph-invoke level — not code added to every node. `on_llm_end` fires for
+  every model call regardless of which node made it (same mechanism `get_langfuse_callback()`
+  already used), so zero changes were needed in `grader.py`/`coach.py`/`planner.py`/
+  `readiness.py` to track their cost.
+- Known simplification: the budget callback prices every call against the primary
+  `model_id` (can't reliably tell which model served a call from inside a callback) —
+  matters only if a Phase 10a fallback actually fires; documented, not silently assumed.
+- Full write-up: [`doc/phase-10-production-hardening.md`](../doc/phase-10-production-hardening.md).
+
 ### Phase 8a — 2026-06-29
 **Built:** `loop/embeddings.py` — `get_embeddings()` factory returning `BedrockEmbeddings(model_id, region_name)`;
 mirrors the model factory seam from Phase 0 (`get_chat_model()`). `bedrock_embed_model_id` added to `loop/config.py`
