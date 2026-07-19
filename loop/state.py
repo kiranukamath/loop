@@ -27,6 +27,27 @@ def _append_list(left: list | None, right: list | None) -> list:
     return (left or []) + (right or [])
 
 
+def _reset_or_append(left: list | None, right: list | None) -> list:
+    """Reducer for state["panel_grades"] (Phase 13a): append like _append_list,
+    but a `right` of None means "reset", not "append nothing".
+
+    Why this exists: an append-only reducer channel can't be cleared by a
+    normal node return. `{"panel_grades": []}` does NOT clear it — the
+    reducer runs as `(left or []) + ([] or [])`, which is just `left`
+    unchanged (verified empirically: InvalidUpdateError-free, but no-op).
+    `grade_aggregator` needs to wipe the scratch channel after reducing one
+    question's persona partials into a final Grade, so the *reset signal*
+    has to be something a normal partial-write never sends: None, which
+    _append_list already treats as "nothing to append" (also a no-op).  This
+    reducer instead treats None as "clear it" — safe here because the only
+    two writers are panel_grader (always appends a real partial dict, never
+    None) and grade_aggregator (which sends None exactly when it means reset).
+    """
+    if right is None:
+        return []
+    return (left or []) + right
+
+
 class LoopState(dict):
     """
     LangGraph state for the interview coach.
@@ -84,6 +105,20 @@ class LoopState(dict):
     # flagged. See loop/guardrails.py.
     flagged_inputs: Annotated[Optional[list[dict]], _append_list]
 
+    # ── Phase 13a (panel grading — parallel fan-out/fan-in) ──────────────────
+    # Transient scratch channel: each panel_grader Send writes one persona's
+    # partial grade here; grade_aggregator reduces every partial for the
+    # current question into one Grade, then resets this to [] by returning
+    # None (see _reset_or_append above). Never read outside panel.py.
+    panel_grades: Annotated[Optional[list[dict]], _reset_or_append]
+
+    # ── Phase 13b (supervisor + handoffs) ────────────────────────────────────
+    # Traceability only — one entry per interview_supervisor decision
+    # (which modality it picked and why). Not read by any node; a window into
+    # the model's reasoning for debugging/observability, the same role
+    # Langfuse traces play for individual model calls.
+    supervisor_decisions: Annotated[Optional[list[dict]], _append_list]
+
 
 def initial_state() -> dict:
     """Return a blank starting state with safe defaults for all optional fields.
@@ -112,4 +147,6 @@ def initial_state() -> dict:
         "verdict_approved": None,
         "session_index": 0,
         "flagged_inputs": None,
+        "panel_grades": None,
+        "supervisor_decisions": None,
     }

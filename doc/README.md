@@ -12,6 +12,7 @@ along the way.
 | [phase-10-production-hardening.md](phase-10-production-hardening.md) | 10 | Resilience, guardrails, cost budgeting |
 | [phase-11-session-history.md](phase-11-session-history.md) | 11 | Checkpoint replay / observability |
 | [phase-12-mcp-interop.md](phase-12-mcp-interop.md) | 12 | Model Context Protocol — Loop as MCP server + client |
+| [phase-13-multiagent-orchestration.md](phase-13-multiagent-orchestration.md) | 13 | Supervisor pattern · parallel fan-out/fan-in (Send) · Command handoffs |
 
 Phases 0–9 were built in earlier sessions — their teaching content lives in
 the conversation history from those sessions and in the code comments
@@ -20,4 +21,7 @@ closed out the full 12-phase v1+production-track plan (0–11) in one sitting.
 Phase 12 is the start of the v2 "frontier track" — see `PLAN.md` for the full
 roadmap. The underlying MCP *concepts* (protocol, roles/primitives,
 transports) live in [`../docs/README.md`](../docs/README.md#phase-12--mcp--interoperability);
-this file is the "what we built" walkthrough.
+this file is the "what we built" walkthrough. Same split for Phase 13: the
+multi-agent *concepts* (fixed workflow vs. multi-agent, Send/map-reduce,
+Command handoffs + supervisor, reducers + bounded agency) live in
+[`../docs/README.md`](../docs/README.md#phase-13--multi-agent-orchestration).

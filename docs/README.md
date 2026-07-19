@@ -43,6 +43,23 @@ line-by-line.
 
 ---
 
+## Phase 13 — Multi-agent orchestration
+
+Crossing from "a fixed workflow with one dynamic node" into a real multi-agent system:
+who owns control flow, the Send API for parallel fan-out/fan-in, Command handoffs and the
+supervisor pattern, and the reducer + bounded-agency mechanics that make any of it safe.
+Read 16 first (the concept reset), then 17–18 (the two new mechanisms), then 19 (the
+internals + the safety guarantee).
+
+| # | Doc | One-line summary |
+|---|-----|-----------------|
+| 16 | [Fixed workflow vs. multi-agent](16-fixed-workflow-vs-multiagent.md) | Who decides the next step — the graph's topology, or a model's judgment — and the backend analogy for each |
+| 17 | [The Send API: map-reduce](17-send-api-map-reduce.md) | `Send(node, arg)` replaces state, not merges with it; the fan-in barrier runs once; a node can fan out too |
+| 18 | [Command handoffs & the supervisor pattern](18-command-handoffs-and-supervisor-pattern.md) | `Command(goto=...)`, the no-static-edge rule, `plan_approval` as the handoff Loop already had, `interview_supervisor` as the generalization |
+| 19 | [Reducers deep dive + bounded agency](19-reducers-deep-dive-and-bounded-agency.md) | Why `{"x": []}` doesn't clear a channel, the reset-sentinel reducer, and the two-layer termination guarantee (own bound + `recursion_limit` backstop) |
+
+---
+
 ## Quick reading guide
 
 **First time through Phase 8:** read 1 → 2 → 3 → 6 → 7. Skip 4 and 5 on first read.
@@ -60,6 +77,10 @@ one builds on the last (protocol → roles/primitives → transports/safety).
 15 after 9–11. 14 is the one to read closely before touching any code that
 mixes sync LangGraph nodes with async tool sources — it's a real failure
 mode, not a hypothetical.
+
+**First time through Phase 13:** read 16 → 17 → 18 → 19 in order. 17 and 18 are
+the two mechanisms `loop/nodes/panel.py` and `loop/nodes/supervisor.py` are
+each built from; 19 is what makes either one safe to actually ship.
 
 ---
 

@@ -28,7 +28,7 @@ completes.
 | 11 | Session history UI | reading checkpoint state / replay | ✅ done & approved (11a, 11b) | — |
 | — | *— v2 "frontier track" begins below (Phases 12+) —* | | | |
 | 12 | MCP & interoperability | interop / Model Context Protocol | ✅ done & approved (12a, 12b) | — |
-| 13 | Multi-agent orchestration | supervisor · parallel (Send) · handoffs | ⬜ not started (v2) — spec'd | — |
+| 13 | Multi-agent orchestration | supervisor · parallel (Send) · handoffs | ✅ done & approved (13a, 13b, 13c) | — |
 | 14 | Advanced RAG (Track C) | reranking · CRAG · query rewriting | ⬜ not started (v2) — spec'd | — |
 | 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ⬜ not started (v2) — spec'd | — |
 | 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ⬜ not started (v2) — spec'd | — |
@@ -113,6 +113,25 @@ vanilla-JS list/detail page (same dark Tailwind theme as `index.html`);
 manually verified in-browser against the real `db/loop_state.sqlite` file
 from an earlier phase's demo run — list view, detail view (plan card, graded
 Q&A card with score bar, gaps), and back-navigation all render correctly.
+
+**Phase 13 complete ✅ (272 tests, 0 lint errors). Phase 13 is fully done (13a, 13b, 13c).**
+`loop/nodes/panel.py` — `grade_dispatch`/`panel_grader`/`grade_aggregator`, a parallel
+"panel of graders" via the Send API, gated by `settings.panel_grading` (default `False`).
+`loop/nodes/supervisor.py` — `interview_supervisor`, a Command-handoff node replacing
+`session_router`/`_route_by_modality`/`_route_after_session` as a unit, gated by
+`settings.orchestration_mode == "supervisor"` (default `"fixed"`). `loop/graph.py`'s
+`build_graph()` is now parametrized (`orchestration_mode`, `panel_grading`) and branches
+only the two regions Phase 13 touches — `compile_graph()` hard-pins both flags to their
+Phase-12 defaults so the existing 254 tests are pinned byte-for-byte; `compile_graph_with_
+memory()` reads `settings`, so the live server opts in via `.env`, no code change.
+`loop/state.py` gained `panel_grades` (new `_reset_or_append` reducer — `None` means
+"clear", not "append nothing", since a plain `{"x": []}` return can't clear an append-only
+channel) and `supervisor_decisions` (traceability). `loop/schemas.py` gained
+`PersonaGrade`/`SupervisorDecision`. `tests/test_multiagent.py` — 18 new offline tests,
+mutation-tested (deliberately broke the supervisor's bound check and confirmed the right
+tests failed) before being called done. Docs: `docs/16-19` (fixed-workflow-vs-multiagent,
+the Send API, Command handoffs + supervisor pattern, reducers + bounded agency) +
+`doc/phase-13-multiagent-orchestration.md` (the build walkthrough).
 
 **Phase 12b complete ✅ (254 tests, 0 lint errors). Phase 12 is fully done.**
 `loop/research/mcp_client.py::load_mcp_tools()` builds a
@@ -1149,13 +1168,13 @@ _reset_or_append]` (+ the new reducer; init `None`); optional `supervisor_decisi
 "fixed"`; **reuse `max_sessions`** as the supervisor bound (no new bound knob).
 
 **Task checklist:**
-- [ ] `loop/state.py` — `panel_grades` channel + `_reset_or_append` reducer.
-- [ ] `loop/config.py` — `panel_grading`, `grader_personas`, `orchestration_mode`.
-- [ ] `loop/nodes/panel.py` — `grade_dispatch` (fan-out) + `panel_grader` (persona) + `grade_aggregator` (fan-in).
-- [ ] `loop/nodes/supervisor.py` — `interview_supervisor` (Command-handoff routing).
-- [ ] `loop/graph.py` — parametrized `build_graph(...)`; flag-gated wiring of both regions.
-- [ ] `loop/schemas.py` — persona-score sub-model if needed.
-- [ ] `tests/test_multiagent.py` — offline, deterministic (see strategy below).
+- [x] `loop/state.py` — `panel_grades` channel + `_reset_or_append` reducer.
+- [x] `loop/config.py` — `panel_grading`, `grader_personas`, `orchestration_mode` (+ `panel_debate` for 13c).
+- [x] `loop/nodes/panel.py` — `grade_dispatch` (fan-out) + `panel_grader` (persona) + `grade_aggregator` (fan-in).
+- [x] `loop/nodes/supervisor.py` — `interview_supervisor` (Command-handoff routing).
+- [x] `loop/graph.py` — parametrized `build_graph(...)`; flag-gated wiring of both regions.
+- [x] `loop/schemas.py` — `PersonaGrade` + `SupervisorDecision`.
+- [x] `tests/test_multiagent.py` — offline, deterministic (see strategy below). 18 tests.
 
 **Files touched:** `loop/graph.py`, `loop/nodes/panel.py` (new), `loop/nodes/supervisor.py` (new),
 `loop/state.py`, `loop/config.py`, `loop/schemas.py`, `tests/test_multiagent.py` (new), `PLAN.md`.
@@ -1500,6 +1519,57 @@ as server activities.
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 13a+13b+13c — 2026-07-19
+**Built:** `loop/nodes/panel.py` — `grade_dispatch(state) -> list[Send]` (fan-out, one
+persona per `settings.grader_personas`), `panel_grader(payload)` (per-persona scoring,
+reads `payload` never `state`), `grade_aggregator(state) -> Command` (fan-in — averages
+criterion scores across personas, unions strengths/improvements, emits the reset sentinel).
+`loop/nodes/supervisor.py::interview_supervisor` — a `Command`-handoff node replacing
+`session_router`/`_route_by_modality`/`_route_after_session` as a unit, bounded by
+`session_index >= min(len(sessions), settings.max_sessions)` checked BEFORE any model call.
+`loop/graph.py::build_graph(orchestration_mode="fixed", panel_grading=False)` — ONE function
+wiring the shared spine plus two flag-gated regions; `compile_graph()` hard-pins both flags
+so the existing 254 tests are pinned to the exact Phase 12 graph; `compile_graph_with_
+memory()` reads `settings`. `plan_approval` gained an optional `next_node` param (default
+`"session_router"`, unchanged for every existing caller) so it can hand off to
+`interview_supervisor` in supervisor mode without knowing which mode is active.
+`loop/state.py` — `panel_grades` (new `_reset_or_append` reducer) + `supervisor_decisions`
+(traceability). `loop/config.py` — `panel_grading`, `grader_personas`, `panel_debate`
+(13c stretch), `orchestration_mode`. `loop/schemas.py` — `PersonaGrade`, `SupervisorDecision`.
+`tests/test_multiagent.py` — 18 new offline tests (272/272 total, 0 lint errors). Docs:
+`docs/16-19` (fixed-workflow-vs-multiagent, the Send API, Command handoffs + supervisor
+pattern, reducers + bounded agency) + `doc/phase-13-multiagent-orchestration.md`.
+
+**Key decisions / lessons:**
+- **Verified before coding (CLAUDE.md rule #7), not trusted from the PLAN's prose:** three
+  facts that shaped the design, each confirmed with a throwaway script against
+  `langgraph==1.2.5` before touching product code — (1) `Send(node, arg)`'s `arg` REPLACES
+  the target node's input, it does not merge with graph state; (2) `{"panel_grades": []}`
+  does NOT clear an append-reducer channel (`(left or []) + ([] or []) = left`, unchanged)
+  — only a reducer that treats a *different* sentinel (we use `None`) as "clear" can reset
+  one; (3) a plain node (not just a conditional-edge path function) CAN return
+  `Command(goto=[Send(...), ...])` to fan out — this is what makes the 13c debate round's
+  "fan-in that sometimes re-fans-out" shape possible from a single `grade_aggregator` node.
+- **`grade_aggregator` and `interview_supervisor` both register with NO static outgoing
+  edge**, same rule `plan_approval` (Phase 5) already followed: a node that sometimes
+  returns `Command(goto=X)` and sometimes `Command(goto=Y)` must never also have a static
+  edge to either destination, or both paths fire in the same superstep. Verified this isn't
+  just a docstring warning — deliberately adding a competing static edge in a mutation test
+  did NOT get caught by the non-debate-path tests (both routes agreed on `"coach"` in that
+  configuration), a real gap in coverage that's now documented rather than silently assumed
+  covered.
+- **Mutation-tested before calling it done**, not just written and trusted: disabled
+  `interview_supervisor`'s bound check and confirmed the two bound-related tests failed
+  (and only those two); confirmed `GraphRecursionError` fires against a deliberately broken
+  supervisor stub that ignores `session_index` entirely, proving the recursion-limit
+  backstop is real, not just documented.
+- **Offline supervisor test needed a non-constant model stub**, unlike every prior phase's
+  `lambda _: STUB_VALUE` pattern: since `chain = _PROMPT | structured_model` pipes the
+  *rendered* prompt into the stub (not the raw input dict), "reproduce today's plan-based
+  modality sequence" required a stub that parses the rendered human message back out via
+  regex to echo the plan's suggested modality — a genuine function of input, not a constant.
+- Full write-up: [`doc/phase-13-multiagent-orchestration.md`](doc/phase-13-multiagent-orchestration.md).
 
 ### Phase 12a+12b — 2026-07-19
 **Built:** `loop/mcp_server.py` — a `FastMCP("loop")` server exposing four thin `@mcp.tool()`

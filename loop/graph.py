@@ -26,6 +26,13 @@ Phase 9b addition:
     explicitly from fixtures/sample_company.txt so all existing offline flows/tests
     are unaffected unless a company is deliberately provided.
 
+Phase 13 additions (both flag-gated, default OFF — see build_graph()'s docstring):
+  - panel_grading: grader → grade_dispatch (fan-out) / panel_grader / grade_aggregator
+    (fan-in), a parallel "panel of graders" via the Send API (loop/nodes/panel.py).
+  - orchestration_mode="supervisor": session_router / _route_by_modality /
+    _route_after_session → interview_supervisor, one Command-handoff node that
+    decides the next specialist (or readiness) at runtime (loop/nodes/supervisor.py).
+
 Run with:  uv run python -m loop.graph
 """
 
@@ -34,13 +41,16 @@ import pathlib
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from loop.config import settings
 from loop.guardrails import detect_injection, redact_pii
 from loop.nodes.coach import coach
 from loop.nodes.grader import grader
 from loop.nodes.interviewers import beh_interviewer, coding_interviewer, sd_interviewer
+from loop.nodes.panel import grade_aggregator, grade_dispatch, panel_grader
 from loop.nodes.planner import planner
 from loop.nodes.readiness import readiness
 from loop.nodes.research import research
+from loop.nodes.supervisor import interview_supervisor
 from loop.observability import get_langfuse_callback
 from loop.state import LoopState, initial_state
 
@@ -144,21 +154,27 @@ def _route_after_session(state: dict) -> str:
 # ── Plan approval node (HITL gate 1) ─────────────────────────────────────────
 
 
-def plan_approval(state: dict) -> Command:
+def plan_approval(state: dict, next_node: str = "session_router") -> Command:
     """Show the PrepPlan to the human and wait for approval.
 
     Calls interrupt() to pause the graph.  The human's response dict drives
     routing via Command(goto=...):
 
       {'decision': 'approve'}
-          → Command(goto='session_router', update={'plan_approved': True})
+          → Command(goto=next_node, update={'plan_approved': True})
       {'decision': 'edit', 'updated_plan': {...}}
-          → Command(goto='session_router', update={'plan': ..., 'plan_approved': True})
+          → Command(goto=next_node, update={'plan': ..., 'plan_approved': True})
       {'decision': 'reject'}
           → Command(goto=END, update={'plan_approved': False})
 
     IMPORTANT: this node has NO static edge defined — it always returns Command.
     A static edge would compete with Command(goto=END) and cause both paths to run.
+
+    next_node (Phase 13b): "session_router" in orchestration_mode="fixed" (the
+    default — every existing call site is unaffected), or "interview_supervisor"
+    in orchestration_mode="supervisor". build_graph() binds this via a small
+    closure so plan_approval itself stays orchestration-mode-agnostic — it
+    doesn't need to know which mode it's running under, just where to hand off.
 
     Analogy: a pull-request that can be approved, edited, or closed without merge.
     """
@@ -176,12 +192,12 @@ def plan_approval(state: dict) -> Command:
 
     if decision == "edit":
         return Command(
-            goto="session_router",
+            goto=next_node,
             update={"plan": human_response["updated_plan"], "plan_approved": True},
         )
 
     # 'approve'
-    return Command(goto="session_router", update={"plan_approved": True})
+    return Command(goto=next_node, update={"plan_approved": True})
 
 
 # ── Routing function (used by conditional edge) ───────────────────────────────
@@ -204,30 +220,95 @@ def _route_by_modality(state: dict) -> str:
 # ── Graph definition ──────────────────────────────────────────────────────────
 
 
-def build_graph() -> StateGraph:
-    """Define the Phase 5 graph topology (blueprint — not yet runnable)."""
+def build_graph(orchestration_mode: str = "fixed", panel_grading: bool = False) -> StateGraph:
+    """Define the graph topology (blueprint — not yet runnable).
+
+    Phase 13 parametrizes what was a single fixed topology through Phase 12.
+    ONE build_graph() always wires the shared spine (intake → research/planner
+    → plan_approval; interviewer → grade → coach → advance_session) and
+    branches only the two regions Phase 13 touches — this avoids maintaining
+    two near-duplicate graph-assembly functions:
+
+      orchestration_mode:
+        "fixed"      (default) — today's deterministic routing: session_router
+                     reads the PrepPlan, _route_by_modality/_route_after_session
+                     switch on it. Byte-for-byte the Phase 12 graph.
+        "supervisor" — interview_supervisor (loop/nodes/supervisor.py) replaces
+                     session_router + both routing functions with one LLM-driven
+                     Command-handoff node.
+
+      panel_grading:
+        False (default) — today's single grader node.
+        True             — grade_dispatch/panel_grader/grade_aggregator
+                     (loop/nodes/panel.py) replace it with a parallel
+                     fan-out/fan-in "panel of graders" via the Send API.
+
+    Both flags default OFF so with no arguments this function reproduces the
+    Phase 12 graph exactly — compile_graph() relies on that for its hard pin.
+    """
     graph = StateGraph(LoopState)
 
-    # Register all nodes
+    # ── Shared spine: nodes every mode/flag combination needs ────────────────
     graph.add_node("intake", intake)
     graph.add_node("research", research)  # Phase 9b — ReAct sub-agent, conditional
     graph.add_node("planner", planner)
-    graph.add_node("plan_approval", plan_approval)  # HITL gate 1
-    graph.add_node("session_router", session_router)
     graph.add_node("coding_interviewer", coding_interviewer)
     graph.add_node("sd_interviewer", sd_interviewer)
     graph.add_node("beh_interviewer", beh_interviewer)
-    graph.add_node("grader", grader)
     graph.add_node("coach", coach)
     graph.add_node("advance_session", advance_session)
     graph.add_node("readiness", readiness)  # HITL gate 2
 
-    # Fixed edges: START → intake → [conditional] → plan_approval
-    # plan_approval has NO static outgoing edge — it always returns Command(goto=...)
-    # so routing is determined entirely by the human's decision at runtime.
-    graph.add_edge(START, "intake")
+    # ── plan_approval (HITL gate 1) — hands off to the mode's entry point ───
+    # plan_approval has NO static outgoing edge; it always returns Command(goto=...),
+    # so a static edge would compete with it and run both paths (see its docstring).
+    if orchestration_mode == "supervisor":
+        graph.add_node(
+            "plan_approval", lambda state: plan_approval(state, next_node="interview_supervisor")
+        )
+    else:
+        graph.add_node("plan_approval", plan_approval)
 
-    # Conditional edge: intake → research (if company set) or straight to planner.
+    # ── Routing region: fixed routing functions OR the supervisor ───────────
+    if orchestration_mode == "supervisor":
+        graph.add_node("interview_supervisor", interview_supervisor)
+        # interview_supervisor has NO static outgoing edge either — same reason
+        # as plan_approval: it always returns Command(goto=<specialist|readiness>).
+    else:
+        graph.add_node("session_router", session_router)
+        graph.add_conditional_edges(
+            "session_router",
+            _route_by_modality,
+            path_map={
+                "coding": "coding_interviewer",
+                "system_design": "sd_interviewer",
+                "behavioral": "beh_interviewer",
+            },
+        )
+
+    # ── Grading region: single grader OR the parallel panel ─────────────────
+    if panel_grading:
+        graph.add_node("panel_grader", panel_grader)
+        graph.add_node("grade_aggregator", grade_aggregator)
+        # grade_dispatch is a conditional-edge path FUNCTION, not a node — it
+        # returns list[Send] directly (no path_map needed; each Send names
+        # its own target). Registered once per interviewer source node.
+        graph.add_conditional_edges("coding_interviewer", grade_dispatch)
+        graph.add_conditional_edges("sd_interviewer", grade_dispatch)
+        graph.add_conditional_edges("beh_interviewer", grade_dispatch)
+        graph.add_edge("panel_grader", "grade_aggregator")
+        # grade_aggregator has NO static outgoing edge — like plan_approval,
+        # it always returns Command(goto=...), either to "coach" (finalized)
+        # or to more Sends (13c debate round). A static edge would compete.
+    else:
+        graph.add_node("grader", grader)
+        graph.add_edge("coding_interviewer", "grader")
+        graph.add_edge("sd_interviewer", "grader")
+        graph.add_edge("beh_interviewer", "grader")
+        graph.add_edge("grader", "coach")
+
+    # ── Shared spine edges ────────────────────────────────────────────────────
+    graph.add_edge(START, "intake")
     graph.add_conditional_edges(
         "intake",
         _route_after_intake,
@@ -235,49 +316,43 @@ def build_graph() -> StateGraph:
     )
     graph.add_edge("research", "planner")
     graph.add_edge("planner", "plan_approval")
-
-    # Conditional edge: session_router → one of the three interviewers
-    graph.add_conditional_edges(
-        "session_router",
-        _route_by_modality,
-        path_map={
-            "coding": "coding_interviewer",
-            "system_design": "sd_interviewer",
-            "behavioral": "beh_interviewer",
-        },
-    )
-
-    # All interviewers converge on grader → coach → advance_session
-    graph.add_edge("coding_interviewer", "grader")
-    graph.add_edge("sd_interviewer", "grader")
-    graph.add_edge("beh_interviewer", "grader")
-    graph.add_edge("grader", "coach")
     graph.add_edge("coach", "advance_session")
 
-    # Multi-session loop: advance_session → session_router (more) or readiness (done)
-    # advance_session increments session_index; _route_after_session reads the new value.
-    graph.add_conditional_edges(
-        "advance_session",
-        _route_after_session,
-        path_map={"continue": "session_router", "done": "readiness"},
-    )
+    # ── Multi-session loop: advance_session → (more) or (done) ──────────────
+    # advance_session STAYS in both modes — it still just increments
+    # session_index; only its outgoing edge changes.
+    if orchestration_mode == "supervisor":
+        graph.add_edge("advance_session", "interview_supervisor")
+    else:
+        graph.add_conditional_edges(
+            "advance_session",
+            _route_after_session,
+            path_map={"continue": "session_router", "done": "readiness"},
+        )
 
     graph.add_edge("readiness", END)
 
     return graph
 
 
-def compile_graph():
+def compile_graph(orchestration_mode: str = "fixed", panel_grading: bool = False):
     """Compile the graph without checkpointer/store (used by tests).
 
+    Defaults hard-pin the Phase 12 graph regardless of what's in .env — tests
+    call compile_graph() bare and must get the identical graph every time.
     Tests stub nodes in loop.graph's namespace and call compile_graph() fresh
-    each time — no thread_id required in the invoke config.
+    each time — no thread_id required in the invoke config. Pass explicit
+    args to exercise the Phase 13 variants (see tests/test_multiagent.py).
     """
-    return build_graph().compile()
+    return build_graph(orchestration_mode=orchestration_mode, panel_grading=panel_grading).compile()
 
 
 def compile_graph_with_memory():
     """Compile the graph with MemorySaver checkpointer + InMemoryStore.
+
+    Unlike compile_graph(), this reads settings.orchestration_mode /
+    settings.panel_grading — this is what the live server/demo runner uses,
+    so opting into Phase 13 behavior is a .env change, no code change.
 
     Required for production use:
     - invoke must pass config={'configurable': {'thread_id': '...', 'user_id': '...'}}
@@ -286,7 +361,12 @@ def compile_graph_with_memory():
     """
     from loop.memory import compile_with_memory
 
-    return compile_with_memory(build_graph())
+    return compile_with_memory(
+        build_graph(
+            orchestration_mode=settings.orchestration_mode,
+            panel_grading=settings.panel_grading,
+        )
+    )
 
 
 # ── Module-level compiled graph (with memory for the runner) ──────────────────

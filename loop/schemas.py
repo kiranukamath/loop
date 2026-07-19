@@ -126,6 +126,52 @@ class CompanyResearch(BaseModel):
     sources: list[str] = Field(description="URLs the research is grounded in")
 
 
+# ── Phase 13a: panel grading (parallel fan-out/fan-in) ────────────────────────
+
+
+class PersonaGrade(BaseModel):
+    """One persona-grader's model output for one answer (Phase 13a).
+
+    This is only the MODEL-produced half of a panel partial — panel_grader
+    stitches on `persona`/`question_id`/`round` itself from the payload it
+    was dispatched with, rather than trusting the model to echo them back
+    correctly. grade_aggregator combines K of these (one per
+    settings.grader_personas) into a single Grade with the exact same shape
+    the Phase 3 sequential grader produces — coach and every downstream
+    consumer never know panel grading ran.
+    """
+
+    criterion_scores: dict[str, int] = Field(
+        description="This persona's per-criterion scores, keys match rubric criterion names"
+    )
+    strengths: list[str] = Field(
+        description="What the candidate did well, from this persona's lens"
+    )
+    improvements: list[str] = Field(
+        description="Specific things to improve, from this persona's lens"
+    )
+    notes: str = Field(description="1-2 sentence take on the answer from this persona's lens")
+
+
+class SupervisorDecision(BaseModel):
+    """interview_supervisor's model output (Phase 13b) — which specialist runs next.
+
+    Unlike the Phase 3-7 fixed routing (_route_by_modality reading the
+    PrepPlan's pre-set session.modality verbatim), the supervisor is free to
+    deviate from the plan's literal ordering based on weak_areas — this is
+    the "model decides control flow" lesson. Mapped to a graph node name
+    (coding_interviewer/sd_interviewer/beh_interviewer) by interview_supervisor.
+    """
+
+    next_modality: Literal["coding", "system_design", "behavioral"] = Field(
+        description="Which interview modality to run next"
+    )
+    focus: str = Field(
+        description="One sentence on what to emphasise this session, given weak_areas and the plan"
+    )
+    topics: list[str] = Field(description="Specific topics for this session")
+
+
 class ReadinessVerdict(BaseModel):
     """Readiness node output — overall interview readiness after a session.
 

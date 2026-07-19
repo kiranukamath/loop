@@ -6,6 +6,8 @@ If a required field is missing it raises a clear error at startup — exactly li
 Spring's @ConfigurationProperties failing fast on a missing property.
 """
 
+from typing import Literal
+
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -89,6 +91,26 @@ class Settings(BaseSettings):
     # Only stdio is supported in v1 -- remote HTTP/SSE servers are a v2 seam,
     # same treatment as the Tavily search provider and the Ollama model swap.
     mcp_server_configs: dict[str, dict[str, object]] = {}
+
+    # ── Multi-agent orchestration (Phase 13) ──────────────────────────────────
+    # Panel grading (13a): fan an answer out to K persona-graders in parallel
+    # via LangGraph's Send API, then reduce their partials into one Grade.
+    # Off by default — loop/nodes/grader.py's sequential path is untouched
+    # either way; build_graph() only wires the panel region when this is True.
+    panel_grading: bool = False
+    grader_personas: list[str] = ["correctness", "communication", "depth"]
+
+    # Panel debate (13c, stretch): when panel_grading is also on, each
+    # persona sees the others' round-0 scores and revises once before
+    # grade_aggregator reduces the LATEST round only. Off by default.
+    panel_debate: bool = False
+
+    # Orchestration mode (13b): "fixed" keeps today's deterministic routing
+    # functions (session_router / _route_by_modality / _route_after_session).
+    # "supervisor" replaces all three with one LLM-driven interview_supervisor
+    # node that decides the next specialist (or readiness) via Command(goto=...)
+    # at runtime — the graph stops owning control flow; the model does.
+    orchestration_mode: Literal["fixed", "supervisor"] = "fixed"
 
     model_config = SettingsConfigDict(
         env_file=".env",
