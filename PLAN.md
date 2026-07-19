@@ -26,8 +26,25 @@ completes.
 | 9 | Tool-use research agent | dynamic tool-calling (ReAct) | ✅ done & approved (9a, 9b) | — |
 | 10 | Production hardening | resilience, safety, cost | ✅ done & approved (10a, 10b, 10c) | — |
 | 11 | Session history UI | reading checkpoint state / replay | ✅ done & approved (11a, 11b) | — |
+| — | *— v2 "frontier track" begins below (Phases 12+) —* | | | |
+| 12 | MCP & interoperability | interop / Model Context Protocol | ✅ done & approved (12a, 12b) | — |
+| 13 | Multi-agent orchestration | supervisor · parallel (Send) · handoffs | ⬜ not started (v2) — spec'd | — |
+| 14 | Advanced RAG (Track C) | reranking · CRAG · query rewriting | ⬜ not started (v2) — spec'd | — |
+| 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ⬜ not started (v2) — spec'd | — |
+| 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ⬜ not started (v2) — spec'd | — |
+| 17 | Eval-in-CI (Track H) | regression gate · agent simulation · red-team | ⬜ not started (v2) — spec'd | — |
+| 18 | Production infra & real data (Track G) | pgvector · Postgres · Ollama · real search · real data | ⬜ not started (v2) — spec'd | — |
+| 19 | Voice / multimodal (Track F) | STT+TTS · diagram grading · code sandbox | ⬜ backlog (v2, optional) | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
+**"spec'd"** = full phase section written below; **"backlog — not spec'd"** = lives only in the
+[v2 roadmap](#v2-roadmap--the-frontier-track-phases-12) table, detailed when we reach it.
+
+**v2 roadmap locked in (owner, 2026-07-18):** v1 (0–7) + production track (8–11) are complete.
+The **v2 "frontier track"** starts at Phase 12 with **MCP & interoperability** (owner-selected
+first). The full brainstorm of candidate v2 tracks is captured in the
+[v2 roadmap](#v2-roadmap--the-frontier-track-phases-12) section below; only Phase 12 is spec'd
+in detail so far.
 
 **Phase 7 complete ✅ (158 tests, 0 lint errors). All sub-steps 7a–7e done.**
 Loop is fully usable: `uv run uvicorn loop.api:app --port 8000 --reload` → open http://localhost:8000
@@ -96,6 +113,51 @@ vanilla-JS list/detail page (same dark Tailwind theme as `index.html`);
 manually verified in-browser against the real `db/loop_state.sqlite` file
 from an earlier phase's demo run — list view, detail view (plan card, graded
 Q&A card with score bar, gaps), and back-navigation all render correctly.
+
+**Phase 12b complete ✅ (254 tests, 0 lint errors). Phase 12 is fully done.**
+`loop/research/mcp_client.py::load_mcp_tools()` builds a
+`MultiServerMCPClient` from `settings.mcp_server_configs` (new, empty-dict
+default — an explicit allow-list) and returns its tools as `BaseTool`s;
+empty config (the default) short-circuits to `[]` before importing
+`langchain_mcp_adapters` or spawning anything. `loop/nodes/research.py`
+merges them into the tool list: `tools=[search_web, *load_mcp_tools()]`.
+**Real bug found and fixed, not just a design choice made:** the PLAN
+framed the sync/async crossing as two equally-valid options; empirically
+testing both showed `agent.invoke()` (the original Phase 9 call) raises
+`NotImplementedError: StructuredTool does not support sync invocation` the
+moment an MCP-loaded (async-only) tool is actually called, while making
+`research()` `async def` raises `TypeError: No synchronous function
+provided` the moment the (sync-invoked) parent graph reaches it. Fixed by
+keeping `research()` sync but swapping its internal call to
+`asyncio.run(agent.ainvoke(...))` — verified this doesn't change Phase 9's
+existing behavior (a pure-sync tool list runs identically through
+`ainvoke()`). `tests/fixtures/mock_mcp_server.py` (a second tiny `FastMCP`
+server, one canned tool) is spawned as a **real subprocess** by the real
+`MultiServerMCPClient` in `tests/test_mcp.py` — a genuine MCP-over-stdio
+round trip, still offline (stdio is a local subprocess, not a network
+call). Docs: `docs/11-mcp-transports-and-adapters.md` rewritten with the
+empirical sync/async trace (not the hypothetical two-options framing);
+`doc/phase-12-mcp-interop.md` extended with the full 12b walkthrough.
+
+**Phase 12a complete ✅ (250 tests, 0 lint errors).**
+`loop/mcp_server.py` — a `FastMCP("loop")` server exposing four thin
+`@mcp.tool()` wrappers (`list_questions`, `search_questions`, `get_rubric`,
+`get_reference_answer`), each a one-line delegation to an already-tested
+`loop/tools.py` function — no logic duplicated. New deps `mcp==1.28.1` +
+`langchain-mcp-adapters==0.3.0` (verified against installed versions per
+CLAUDE.md rule #7: `FastMCP.tool()`/`.run()` signatures inspected directly,
+not trusted from memory; found that `list_tools()`/`call_tool()` are `async`
+even though `@mcp.tool()` registration is sync — flagged as the sync/async
+question 12b must resolve for the Phase 9 research node).
+`tests/test_mcp.py` (8 tests, fully offline — stdio is a local subprocess,
+not a network call, so it fits the laptop gate) asserts both tool
+registration (name/description/input-schema) and that calling a tool
+through MCP returns identical data to calling the underlying `tools.py`
+function directly. Manually verified `uv run python -m loop.mcp_server`
+starts cleanly under stdio. Docs: `docs/09–11-mcp-*.md` (protocol concepts:
+JDBC/LSP analogy, host/client/server roles, tools/resources/prompts,
+transports, the `langchain-mcp-adapters` bridge, bounded agency for external
+tools) + `doc/phase-12-mcp-interop.md` (the 12a build walkthrough).
 
 **Phase 8c complete ✅ (178 tests, 0 lint errors). Phase 8 is fully done.**
 `fixtures/reference_answers.json` (24 short model answers, one per question) + `get_reference_answer()`
@@ -830,17 +892,607 @@ thread listing; shaping a nested JSON response in FastAPI; vanilla JS `fetch` + 
 
 ---
 
-## v2 / future enhancements (NOT in v1 — and NOT in the Phase 8–11 track)
+## v2 roadmap — the frontier track (Phases 12+)
 
-> Phases 8–10 deliberately pull *semantic retrieval over fixtures* (8) and *real web search* (9)
-> forward as learning extensions. The items below remain out of scope even after that track —
-> they swap the *infrastructure* behind seams the project already establishes.
+> **Purpose of this section:** capture the full brainstorm of "what would make Loop competitive
+> on the 2026 agentic-AI job market" so no idea is lost, and record the sequence. Phases **12–18
+> are now spec'd in full below** (tracks B/A/C/E/D/H/G); only **Phase 19 (voice — Track F)**
+> remains backlog, spec'd when reached. Same non-negotiable contract as v1: one phase per turn,
+> teach → code → test → pause, laptop-offline test gate. (Specifying 14–18 ahead of build was an
+> explicit owner request; each still defers exact API calls to build-time verification per rule #7.)
+>
+> **Framing:** v1 is a *mostly-fixed workflow* with one dynamic node (the Phase 9 ReAct
+> researcher). The tracks below cross the line into what the market actually pays for: real
+> multi-agent systems, MCP interop, deeper RAG/memory, self-improvement loops, and
+> AWS-grade productionization (the owner's edge).
 
-- **pgvector** behind the Phase 8 retrieval seam (replace `InMemoryVectorStore`).
-- tool for web search
-- Postgres checkpointer + store (swap the Phase 4 seam).
-- Ollama / open-source model via the Phase 0 model factory seam.
-- Real live JD ingest + a genuinely large external question bank (Phase 8 stays over fixtures).
+**Candidate tracks (ranked; each maps to one or more future phases):**
+
+| Track | Theme | Headline ideas | Why it makes you competitive |
+|-------|-------|----------------|------------------------------|
+| **B** | **MCP & interop** *(Phase 12 — locked in)* | Expose Loop as an MCP **server**; **consume** external MCP servers; (stretch) A2A protocol | The 2025–26 standard everyone hires for; highest competitiveness-per-effort; standalone |
+| **A** | **Real multi-agent** *(Phase 13 — spec'd)* | Supervisor + agent **handoffs** (`Command(goto=…)`); **parallel** fan-out/fan-in (Send API); panel-of-judges debate | The defining "you actually understand agents" signal; reworks the graph you know best |
+| **C** | **Advanced RAG** *(Phase 14 — spec'd)* | Hybrid search + **reranking**; query rewriting / HyDE; **corrective-RAG (CRAG)** / Self-RAG; contextual retrieval | Most-requested RAG depth; builds on Phase 8 |
+| **D** | **Advanced memory** *(Phase 16 — spec'd)* | **Reflection/consolidation** (Generative-Agents pattern); episodic/semantic/procedural typing; semantic store search; decay/conflict | Hot research problem; differentiator; builds on Phase 4 |
+| **E** | **Self-improvement loops** *(Phase 15 — spec'd)* | **Reflexion** self-critique; **DSPy** prompt optimization against the eval set; replanning; adaptive difficulty (CAT) | Ties eval (Phase 6) to optimization; a rare, high-signal skill |
+| **F** | **Multimodal & realtime** *(Phase 19 — backlog)* | **Voice** interviews (STT+TTS); whiteboard/diagram grading (vision); real code execution sandbox | Portfolio wow-factor; teaches realtime streaming |
+| **G** | **Production & platform** *(Phase 18 — spec'd; = the old "current v2" infra backlog)* | Deploy to **AWS** (ECS/Lambda/LangGraph Platform); **Postgres + pgvector**; **prompt caching**; queueing/rate-limits; OTel + cost dashboards; auth/multi-tenancy | The owner's AWS/backend edge — highest-paying intersection |
+| **H** | **Eval & safety at prod grade** *(Phase 17 — spec'd)* | **Eval-in-CI** regression gate; **agent simulation** testing (synthetic candidate); automated red-teaming / Llama Guard | Treats agent quality like a test suite — standout senior signal; backend CI/CD strength |
+
+**Recommended sequence** (front-load universally-demanded skills, finish on the AWS edge):
+**12 = B (MCP)** → 13 = A (multi-agent) → 14 = C (advanced RAG) → 15 = E (self-improvement) →
+16 = D (advanced memory) → 17 = H (eval-in-CI + simulation) → 18 = G (AWS deploy + pgvector +
+caching) → 19 = F (voice, optional capstone). Sequence is advisory — re-pick per phase.
+
+> The **infrastructure-swap** items (pgvector, Postgres, Ollama, real search, real data) are
+> *plumbing swaps behind existing seams*, not learning phases in themselves — so they are grouped
+> into one production phase: **Phase 18 — Production infrastructure & real data** (Track G, spec'd
+> below). Placed after the concept-heavy phases (owner-delegated ordering decision); pullable
+> earlier if you decide to deploy.
+
+---
+
+## Phase 12 — MCP & interoperability  *(Capability: INTEROP — Model Context Protocol)*
+
+**Goal:** make Loop speak **MCP in both directions** — (a) **expose** Loop's question-bank /
+rubric / reference / grader logic as an **MCP server** any client (Claude Desktop, Cursor,
+another agent) can call, and (b) **consume** external MCP servers' tools inside Loop's ReAct
+research agent (Phase 9). Same tool *logic*, now behind the industry-standard protocol instead
+of bespoke Python calls — the decoupling lesson, taken to its conclusion.
+
+**Why it exists / what it teaches:** MCP (Anthropic, late 2024; now the de-facto standard) is
+the *"USB-C for LLM tools"* — one protocol so any client can use any server's tools/resources/
+prompts without custom glue. Authoring an MCP server and consuming MCP servers is now
+table-stakes in agentic-AI hiring. It also proves the seam philosophy end-to-end: the *exact
+same* Phase 3 `tools.py` + Phase 8 `retrieval.py` code becomes reusable by tools you don't own,
+and the Phase 9 `create_agent` node gains external tools without a rewrite.
+
+**Owner decisions / stack (⚠ VERIFY at build time per CLAUDE.md rule #7 — these packages are
+NOT installed yet; MCP APIs move fast):**
+- **Server SDK:** the official **`mcp`** Python SDK's **`FastMCP`** (`from mcp.server.fastmcp
+  import FastMCP`) — decorator-based (`@mcp.tool()`), feels like FastAPI. *Verify at build:*
+  whether the current/maintained path is the SDK's bundled FastMCP or the standalone
+  **`fastmcp`** (v2) package, and the exact import + run API. Pin the verified version.
+- **Client/adapter:** **`langchain-mcp-adapters`** (`MultiServerMCPClient`) — loads an MCP
+  server's tools as `langchain-core` `BaseTool`s, which the existing `create_agent` research
+  node **already accepts**. *Verify at build:* `get_tools()` is **async** — the Phase 9
+  `research()` node is **sync**, so decide the sync/async boundary (an `asyncio.run(...)`
+  wrapper vs. making the node async — check what `create_agent` + `graph.stream()` expect).
+- **Transport:** **stdio** (client spawns the server as a subprocess, talks over stdin/stdout)
+  for *both* the server we publish and the servers we consume — fully offline, exactly how
+  Claude Desktop launches local servers. **Streamable-HTTP/SSE transport = v2 seam** (same
+  "seam exists, not implemented" treatment as Tavily search and the Ollama model).
+- **New deps (add + `uv sync` in 12a):** `mcp`, `langchain-mcp-adapters`. Verify + pin versions.
+- **Offline test gate:** MCP over stdio is a **local subprocess, not a network call** → it fits
+  the laptop gate. Tests spin up a tiny local stdio MCP server *fixture* and round-trip through
+  the real client. No external server, no keys, deterministic. (Registering Loop's server in a
+  real Claude Desktop is a *server/manual activity*, like live Bedrock calls.)
+
+**Concepts to teach:**
+- **What MCP is:** an open protocol standardizing how apps give LLMs tools + data. *Analogy:*
+  **JDBC/ODBC** (one driver interface, many databases) or **LSP** (one protocol, every editor
+  talks to every language server) — write the tool once, every MCP client can use it. Contrast
+  with a LangChain `@tool`, which only LangChain can consume.
+- **MCP primitives:** **tools** (model-invoked functions — our focus), **resources** (readable
+  context/data addressed by URI), **prompts** (reusable prompt templates a client can surface).
+  We expose tools; mention where Loop's rubrics could be *resources* and its interview prompts
+  could be *prompts*.
+- **Host / client / server roles:** the **host** (Claude Desktop, an IDE, your agent runtime)
+  runs an MCP **client** that connects to MCP **servers**. Loop plays **both** — server (12a)
+  and client (12b).
+- **Transports:** **stdio** (local subprocess, zero network) vs **streamable HTTP/SSE** (remote).
+  Why stdio is the natural laptop/offline choice and what changes for a remote server.
+- **`langchain-mcp-adapters` as the bridge:** MCP tools → LangChain `BaseTool`, so Phase 9's
+  `create_agent` needs **no rewrite** — the same decoupling lesson as the model/embeddings/
+  search factories.
+- **Bounded agency reprise:** consuming *external* tools re-raises the Phase 9 safety points —
+  an **allow-list** of which MCP servers/tools the agent may load (config-driven), and the
+  recursion bound still applies. Untrusted external tools are a prompt-injection surface
+  (ties back to Phase 10 guardrails).
+
+**Sub-steps (each = one turn: teach → code → test → pause):**
+
+- **12a — Loop as an MCP server.**
+  - `loop/mcp_server.py`: a `FastMCP("loop")` instance exposing existing fixture logic as
+    `@mcp.tool()`s — e.g. `list_questions(modality)`, `search_questions(query, modality, k)`
+    (delegates to `loop.tools.search_questions` / `loop.retrieval`), `get_rubric(question_id)`,
+    `get_reference_answer(question_id)`. Each tool is a **thin wrapper over already-tested
+    Phase 3/8 functions — NO logic duplication.** Runnable via `uv run python -m loop.mcp_server`
+    (stdio entrypoint).
+  - Document how to register it in an MCP client (Claude Desktop config JSON / the MCP
+    Inspector) — a *server/manual activity*, not part of the laptop gate.
+  - Tests (offline): import the server module, assert the tools are registered (name /
+    description / input schema) and that each tool wrapper returns the same shape as the
+    underlying `tools.py` function. (Full stdio round-trip is exercised in 12b.)
+
+- **12b — Loop consumes external MCP servers (research agent).**
+  - `loop/research/mcp_client.py`: `load_mcp_tools()` builds a `MultiServerMCPClient` from
+    config and returns the loaded `BaseTool`s. **Empty config → returns `[]`** (feature-off
+    default, like an empty `fallback_model_id`). Handle the async `get_tools()` from the sync
+    research node (verified boundary from the stack decision above).
+  - `loop/config.py`: add `mcp_server_configs` (default empty) — the **allow-list** of servers
+    the research agent may consume: `name → {command, args, transport: "stdio"}`.
+  - `loop/nodes/research.py`: append MCP-loaded tools to the existing `[search_web]` list
+    before building `create_agent`. **With no MCP config, behavior is byte-for-byte Phase 9**
+    (zero regressions — same "opt-in, off by default" design as `company` in 9b, so no existing
+    test starts making MCP/subprocess calls).
+  - Tests (offline): a tiny fixture MCP server (`tests/fixtures/mock_mcp_server.py`, a `FastMCP`
+    exposing one canned tool over stdio) is launched by the **real** `MultiServerMCPClient`;
+    assert (1) `load_mcp_tools()` returns the fixture's tool as a `BaseTool`, (2) invoking it
+    round-trips the canned result through actual MCP-over-stdio (a subprocess — deterministic,
+    offline), (3) empty config → `[]` and the research node's tool list is unchanged.
+
+**Task checklist:**
+- [ ] `pyproject.toml` — add `mcp`, `langchain-mcp-adapters`; `uv sync`. Verify + pin versions.
+- [ ] `loop/mcp_server.py` — `FastMCP` server wrapping `tools.py` / `retrieval.py`; `__main__`
+      stdio entrypoint.
+- [ ] `loop/research/mcp_client.py` — `load_mcp_tools()` via `MultiServerMCPClient` (config-driven,
+      empty → `[]`; sync/async boundary handled).
+- [ ] `loop/config.py` — `mcp_server_configs` (default empty allow-list).
+- [ ] `loop/nodes/research.py` — merge MCP tools into the research agent's tool list.
+- [ ] `tests/fixtures/mock_mcp_server.py` — minimal stdio MCP server fixture.
+- [ ] `tests/test_mcp.py` — server tool-registration + client stdio round-trip + empty-config
+      no-op, all offline.
+- [ ] Docs (README / `doc/`): how to register Loop's server in Claude Desktop / MCP Inspector.
+
+**Files touched:** `loop/mcp_server.py` (new), `loop/research/mcp_client.py` (new),
+`loop/config.py`, `loop/nodes/research.py`, `pyproject.toml`,
+`tests/fixtures/mock_mcp_server.py` (new), `tests/test_mcp.py` (new), `PLAN.md`.
+
+**Done when:** `uv run python -m loop.mcp_server` serves Loop's tools over MCP (manually verified
+in Claude Desktop / MCP Inspector — a server activity); the research agent can load + call tools
+from an external MCP server via config; with no MCP config the flow is byte-for-byte the Phase 9
+flow; a local stdio MCP round-trip is tested offline; lint + pytest pass.
+
+**Skills needed:** `FastMCP` server authoring (`@mcp.tool()`, stdio transport);
+`langchain-mcp-adapters` `MultiServerMCPClient` (async `get_tools()`); MCP primitives &
+transports; reusing the factory/seam pattern; handling the sync/async boundary between the
+LangGraph node and the async MCP client — **all verified against installed versions at build.**
+
+---
+
+## Phase 13 — Multi-agent orchestration  *(Capability: MULTI-AGENT — supervisor · parallel · handoffs)*
+
+**Goal:** cross the line from a *fixed workflow* into a *real multi-agent system* by teaching the
+three core patterns on Loop's own graph: a **supervisor** that reasons about who acts next,
+**handoffs** between agents via `Command(goto=…)`, and **parallel fan-out/fan-in** via the
+**Send API**. Every change is **flag-gated, default-off** so the existing deterministic graph and
+all ~242 offline tests keep passing unchanged (the Phase 9b "opt-in, off by default" discipline).
+
+**Why it exists / what it teaches:** "supervisor + handoffs + parallel agents" is the defining
+"you actually understand agents, not just prompt chains" signal, and reworks the graph the owner
+already knows deeply. v1's graph decides control flow; here the *model* decides it.
+
+**Owner decisions / stack (APIs empirically verified against installed `langgraph==1.2.5` /
+`langchain-core==1.4.7` during planning; re-verify at build per rule #7):**
+- **`Send` import:** `from langgraph.types import Send` — **NOT** the deprecated
+  `langgraph.constants` re-export (emits `LangGraphDeprecatedSinceV10`). Consistent with the
+  existing `Command`/`interrupt` imports from `langgraph.types` in `graph.py`.
+- **`Send(node, arg)` semantics:** `arg` becomes the invoked node's **input — it is NOT merged
+  with graph state.** So the dispatcher must *pack* everything the persona needs into `arg`; the
+  persona node reads `payload`, not `state`. (Proven during planning: a `Send`-invoked node
+  received exactly the `arg`, not `LoopState`.)
+- **Fan-in runs once:** three `Send` branches into one aggregator ⇒ the aggregator executes
+  **1×** (superstep barrier), so appending one final `Grade` won't duplicate. (Verified.)
+- **Un-clearable append channel:** a channel with an append reducer **cannot be reset** by a
+  normal node return — teach a small **custom reset-sentinel reducer** `_reset_or_append(left,
+  right)` (returns `[]` on a `None`/sentinel `right`, else `(left or []) + (right or [])`). This
+  is the honest fix for "reset the panel after aggregation" and a genuinely good reducer lesson.
+  (Verified: `InvalidUpdateError` on un-reduced parallel writes; `{"panel": []}` does NOT clear an
+  `_append_list` channel.)
+- **Bound:** the real supervisor bound lives in its **own logic** (decide `done → readiness` when
+  `session_index >= min(len(plan["sessions"]), settings.max_sessions)`); the graph-level
+  **`recursion_limit`** (default 25 supersteps, raises `GraphRecursionError` from
+  `langgraph.errors`) is only the backstop.
+
+**Concepts to teach:**
+- **Fixed workflow vs. multi-agent:** who owns control flow — the graph (today) vs. a reasoning
+  supervisor. Analogy: a hard-coded orchestration DAG vs. a coordinator service that decides call
+  order at runtime.
+- **Supervisor pattern:** one node that picks the next specialist from state — a reasoning
+  replacement for the routing functions `session_router` / `_route_by_modality` /
+  `_route_after_session`.
+- **Handoffs:** `Command(goto=…, update=…)` returned from a node to route dynamically — the
+  codebase **already does this once** in `plan_approval` (graph.py:147), so this generalizes a
+  pattern the owner has seen. Annotate the return `Command[Literal[…destinations…]]` so LangGraph
+  knows the possible targets without static edges.
+- **Parallel fan-out/fan-in (Send API):** dispatch N concurrent branches, then reduce their
+  results — map-reduce for agents. Reducers (Phase 7a's `_append_list`) are how the fan-in
+  collects results; a reset reducer is how the fan-in *clears* the scratch channel.
+- **Reducers as the ONLY way to mutate a channel (incl. reset):** the lesson above, made concrete.
+- **Bounded agency (reprise):** a supervisor that loops needs a bound — same safety lesson as the
+  Phase 9 ReAct iteration bound.
+
+**Sub-steps (each = one turn: teach → code → test → pause):**
+
+- **13a — Parallel fan-out/fan-in: a "panel of graders".** Alongside the single `grader`
+  (grader.py:60), add (new `loop/nodes/panel.py`): a **`grade_dispatch`** fan-out function
+  returning `list[Send]` — one `Send("panel_grader", payload)` per persona (*correctness /
+  communication / depth*), packing persona name + answer text + question_id + rubric slice into
+  `payload`; a single parametrized **`panel_grader(payload)`** node that scores from its payload
+  (reads `payload`, **not** `state`) and writes a partial into a NEW transient `panel_grades`
+  channel (reducer `_reset_or_append`); and a **`grade_aggregator(state)`** fan-in node (reached by
+  a static edge `panel_grader → grade_aggregator`) that reduces the personas into ONE final `Grade`
+  — output shape identical to today's grader `{"grades":[Grade.model_dump()]}` so `coach` and every
+  downstream test are unchanged — and emits the reset sentinel to clear `panel_grades`. Wiring is
+  behind `panel_grading: bool = False`: when on, the three interviewer→grader edges (graph.py:251-253)
+  route into `grade_dispatch`, and `grade_aggregator → coach`; when off, today's `grader` path is
+  untouched. The answer-collection `interrupt()` stays in the **sequential** interviewer upstream —
+  **no `interrupt()` inside the fan-out** (personas are pure `answer → score`, so resume never
+  re-enters the grading superstep mid-flight; `with_resilience` covers transient persona failures).
+- **13b — Supervisor + handoffs.** Add `loop/nodes/supervisor.py::interview_supervisor(state) ->
+  Command[Literal["coding_interviewer","sd_interviewer","beh_interviewer","readiness"]]`: an LLM
+  (or stubbed) decision that, given plan + progress + live `weak_areas`, picks the next specialist
+  (or `readiness`) via `Command(goto=…, update={current_modality/current_focus/current_topics/
+  session_number})`; specialists may hand off via `Command(goto=…)`. **`advance_session`
+  (graph.py:118) STAYS** — it still increments `session_index`; only its outgoing edge changes to
+  `advance_session → interview_supervisor`. The supervisor **replaces the three routing functions**,
+  not the increment node. Bounded by its own `session_index >= min(len(sessions), max_sessions)`
+  guard; `recursion_limit` is the backstop.
+- **13c — (stretch) panel debate round.** Extend 13a so personas see each other's round-1 scores
+  and revise once before aggregation (multi-agent debate → better eval quality). Add a `round`
+  field to each partial so the aggregator selects the **latest** round, not a blind reduce of both.
+
+**Graph assembly (avoids the two-variant maintenance trap):** ONE
+`build_graph(orchestration_mode: str = settings.orchestration_mode, panel_grading: bool =
+settings.panel_grading)` that always wires the shared spine (`intake → research/planner →
+plan_approval`, `interviewer → grade → coach → advance_session`) and branches only the two small
+regions (routing block; grader-vs-panel block) with `if`. `compile_graph(mode="fixed",
+panel_grading=False)` hard-pins the existing ~242 tests to today's behavior regardless of env;
+`compile_graph_with_memory()` reads `settings`. Adding optional params to the existing
+`compile_graph()` / `compile_graph_with_memory()` (graph.py:270,279) is backward-compatible.
+
+**New state / config:** `state.py` — `panel_grades: Annotated[Optional[list[dict]],
+_reset_or_append]` (+ the new reducer; init `None`); optional `supervisor_decisions`
+(traceability). `config.py` — `panel_grading: bool = False`, `grader_personas: list[str] =
+["correctness","communication","depth"]`, `orchestration_mode: Literal["fixed","supervisor"] =
+"fixed"`; **reuse `max_sessions`** as the supervisor bound (no new bound knob).
+
+**Task checklist:**
+- [ ] `loop/state.py` — `panel_grades` channel + `_reset_or_append` reducer.
+- [ ] `loop/config.py` — `panel_grading`, `grader_personas`, `orchestration_mode`.
+- [ ] `loop/nodes/panel.py` — `grade_dispatch` (fan-out) + `panel_grader` (persona) + `grade_aggregator` (fan-in).
+- [ ] `loop/nodes/supervisor.py` — `interview_supervisor` (Command-handoff routing).
+- [ ] `loop/graph.py` — parametrized `build_graph(...)`; flag-gated wiring of both regions.
+- [ ] `loop/schemas.py` — persona-score sub-model if needed.
+- [ ] `tests/test_multiagent.py` — offline, deterministic (see strategy below).
+
+**Files touched:** `loop/graph.py`, `loop/nodes/panel.py` (new), `loop/nodes/supervisor.py` (new),
+`loop/state.py`, `loop/config.py`, `loop/schemas.py`, `tests/test_multiagent.py` (new), `PLAN.md`.
+
+**Done when:** with flags off, the graph is byte-for-byte the Phase 12 graph and all existing
+tests pass; with `panel_grading=True`, one answer is graded by K personas concurrently and
+aggregated into a single `Grade`, with `panel_grades` provably reset by the sentinel reducer
+(tested offline with stubbed persona models — `grade_dispatch` returns N `Send`s; aggregator runs
+once); with `orchestration_mode="supervisor"`, a stubbed supervisor reproduces today's modality
+sequence for a 2-session plan then lands on `readiness`, and an "always keep going" stub still
+terminates via the `max_sessions` guard (plus a test proving `GraphRecursionError` is the
+backstop); lint + pytest pass; (server) one live supervisor + one live panel run sanity-checked.
+
+**Offline test strategy:** stub `loop.nodes.supervisor.get_chat_model` /
+`loop.nodes.panel.get_chat_model` with `RunnableLambda`s that are **pure functions of
+state/payload** (the `conftest.py` planner-stub pattern), so both new paths are deterministic; all
+tests use `compile_graph(...)` (no checkpointer) with interviewers stubbed as today (no interrupts
+fire offline).
+
+**Skills needed:** LangGraph `Send` (fan-out/fan-in via a conditional edge returning `list[Send]`),
+`Command(goto=…, update=…)` handoffs with `Command[Literal[…]]` return annotations, supervisor
+pattern, `recursion_limit` / `GraphRecursionError`, custom reset reducers — the load-bearing
+mechanics were empirically confirmed during planning; re-verify exact signatures at build.
+
+---
+
+## Phase 14 — Advanced RAG  *(Capability: RETRIEVAL depth — hybrid · rerank · corrective)*
+
+**Goal:** upgrade Phase 8's single-shot top-k cosine lookup into a production retrieval pipeline —
+**hybrid search + reranking**, **query rewriting / HyDE**, and a **corrective-RAG (CRAG)** loop
+that grades retrieved questions and re-retrieves (or falls back to web search) when they're weak —
+all **behind the unchanged `retrieve_questions()` / `search_questions()` signature** (retrieval.py:88,
+tools.py:79), so no caller changes.
+
+**Why it exists / what it teaches:** RAG *depth* — especially reranking — is the most-requested
+retrieval skill. Phase 8 taught retrieve→augment→generate; Phase 14 teaches *why naive top-k
+cosine misses*, and the standard fixes.
+
+**Owner decisions / stack (verify at build per rule #7):**
+- **Reranker:** Bedrock Rerank (e.g. `amazon.rerank` / `cohere.rerank`) behind a `get_reranker()`
+  factory mirroring `embeddings.py`; a deterministic **fake reranker** offline. Verify the
+  `langchain-aws` rerank API vs. calling `bedrock-runtime` rerank directly.
+- **Hybrid search:** BM25 (keyword) fused with the existing dense embeddings via **Reciprocal
+  Rank Fusion (RRF)**. BM25 via `rank-bm25` (small, pure-Python, offline) or LangChain
+  `BM25Retriever`. Verify the retriever/ensemble API.
+- **Query rewriting / HyDE:** an LLM step (reuses the model factory) that expands `focus`/`topics`
+  into multiple queries, or embeds a hypothetical answer (HyDE).
+- **CRAG fallback:** reuse the Phase 9 `search_web` seam (research/tools.py) when the bank has no
+  relevant question.
+- **Offline gate:** fake embeddings + fake reranker + deterministic BM25 + stubbed relevance grader.
+
+**Concepts to teach:** why cosine top-k over-retrieves near-duplicates and misses lexical matches
+(→ hybrid + RRF); a **cross-encoder reranker** vs. a bi-encoder embedding (accuracy/latency
+trade); **query transformation** (multi-query, HyDE) as recall boosters; **corrective RAG** — a
+self-correcting retrieval loop (a mini-agent around retrieval); the reranker as another **factory
+seam**, same lesson as `models.py`/`embeddings.py`.
+
+**Sub-steps (each = one turn: teach → code → test → pause):**
+- **14a — Hybrid search + reranking.** Add a BM25 retriever over the 24-question bank; fuse with
+  dense retrieval via RRF; rerank the fused candidates via `get_reranker()`. Swap the *internals*
+  of `retrieve_questions()` (retrieval.py:88) to dense+BM25 → RRF → rerank → top-k; signature
+  unchanged. Config: `rerank_enabled`, `rerank_model_id`, `hybrid_enabled`. Tests: fake reranker
+  reorders deterministically; hybrid returns the lexical+semantic union; signature/shape stable.
+- **14b — Query rewriting / HyDE.** Add `rewrite_query(focus, topics) -> list[str]` before
+  retrieval; the interviewer's query (interviewers.py `_ask_question`) becomes a richer query set.
+  Config: `query_rewrite_mode: off|multiquery|hyde`. Tests: stubbed rewriter expands 1 → N;
+  retrieval consumes all and de-dupes.
+- **14c — Corrective RAG (CRAG).** Add `grade_retrieval(question, focus) -> relevance` + a bounded
+  re-retrieve loop; on persistent low relevance, fall back to `search_web`. Config: `crag_enabled`,
+  `crag_min_relevance`, `crag_max_retries`. Tests: low-relevance stub triggers one re-retrieve then
+  fallback; the retry bound holds.
+
+**Task checklist:** `loop/reranker.py` (new factory); `loop/retrieval.py` (hybrid+RRF+rerank in
+`_build_index`/`retrieve_questions`); `loop/tools.py` (query-rewrite hook, signature stable);
+`loop/nodes/interviewers.py` (query set); `loop/config.py` (rerank/hybrid/rewrite/CRAG knobs);
+`pyproject.toml` (`rank-bm25`); `tests/test_retrieval.py` + new tests.
+
+**Files touched:** `loop/{reranker,retrieval,tools,config}.py`, `loop/nodes/interviewers.py`,
+`loop/research/tools.py` (CRAG fallback reuse), `pyproject.toml`, `tests/*`, `PLAN.md`.
+
+**Done when:** retrieval runs hybrid+rerank behind the unchanged `retrieve_questions()`/
+`search_questions()` signature; query rewriting + CRAG are flag-gated and bounded; every path is
+offline (fake embeddings/reranker/BM25/relevance-grader); lint + pytest pass; (server) one live
+Bedrock-rerank run sanity-checked.
+
+**Skills needed:** BM25 + RRF fusion, cross-encoder reranking (Bedrock Rerank), query
+transformation (multi-query/HyDE), corrective-RAG loops, reranker factory seam — verified at build.
+
+---
+
+## Phase 15 — Self-improvement loops  *(Capability: SELF-IMPROVEMENT — reflexion · replan · DSPy)*
+
+**Goal:** make Loop improve its own outputs and prompts: a **Reflexion self-critique** pass where
+the grader (and optionally planner) critiques and revises its own output before committing;
+**replanning** so the planner adapts the *remaining* curriculum mid-run from live grades; and
+**automatic prompt optimization (DSPy)** that tunes the grader prompt against the Phase 6 labeled
+set (`fixtures/grader_labels.json`).
+
+**Why it exists / what it teaches:** self-refinement (verifier↔generator loops) and *programmatic*
+prompt optimization are rare, high-signal skills — and this is where Phase 6's eval finally feeds
+back into making the agent better, not just measuring it.
+
+**Owner decisions / stack (verify at build per rule #7):**
+- **Reflexion:** a second LLM pass ("critique your own grade against rubric+reference; revise if
+  warranted") — pure model calls, offline-testable with stubs.
+- **DSPy:** `dspy` optimizes the grader prompt (a DSPy module) against `grader_labels.json` with a
+  metric = **`score_agreement`** (reuse `evals/run_grader_eval.py:69`). Optimization is a
+  **server/dev activity** (needs model calls, like live Bedrock) that emits an **optimized-prompt
+  artifact**; the runtime just *loads* it. Verify `dspy` version + its Bedrock LM adapter.
+- **Replanning:** reuse `planner()` (planner.py:103) + the multi-session loop; a bounded re-plan of
+  remaining sessions.
+- **Offline gate:** stub all model calls; tests load a **fixture** optimized-prompt (never run DSPy
+  in `tests/`).
+
+**Concepts to teach:** the **Reflexion** generate→critique→revise loop and why a second pass
+catches first-pass errors; **replanning / plan-and-execute** (adapt the plan when reality diverges
+from assumptions); **DSPy** — prompts as *optimizable programs* tuned against a labeled metric
+instead of hand-crafted; separating an **offline optimization step** (produces an artifact) from
+the **runtime** that consumes it (the model-training/serving split, familiar from ML ops).
+
+**Sub-steps (each = one turn: teach → code → test → pause):**
+- **15a — Reflexion self-critique.** Add `_self_critique(grade, rubric, reference) -> grade` to
+  `grader()` (grader.py); optional for `planner()`. Flag `reflexion_enabled` (default off →
+  today's behavior). Tests: a stubbed critic flips a wrong score; disabled path unchanged.
+- **15b — Replanning / adaptive curriculum.** Add a bounded `replan` decision after `coach`/
+  `advance_session`: if live grades diverge from plan assumptions, re-invoke `planner` on the
+  remaining sessions. Config: `replan_enabled`, `replan_score_threshold`, `replan_max_times`.
+  Tests: stubbed low grades trigger one re-plan that changes remaining modalities; no divergence →
+  no replan; the bound holds.
+- **15c — DSPy prompt optimization (dev/offline artifact).** `evals/optimize_grader.py` DSPy-
+  optimizes the grader prompt against `grader_labels.json` with `score_agreement` as the metric,
+  writing `fixtures/optimized_grader_prompt.txt`; `grader()` loads that artifact if present, else
+  the hand-written prompt. Tests: grader loads a fixture optimized prompt; falls back cleanly when
+  absent. (Running the optimizer = server/dev activity.)
+
+**Task checklist:** `loop/nodes/grader.py` (self-critique + artifact load); `loop/nodes/planner.py`
+(optional critique); `loop/graph.py` (bounded `replan` edge); `loop/config.py` (reflexion/replan
+knobs); `evals/optimize_grader.py` (new); `fixtures/optimized_grader_prompt.txt` (artifact);
+`tests/*`.
+
+**Files touched:** `loop/nodes/{grader,planner}.py`, `loop/graph.py`, `loop/config.py`,
+`evals/optimize_grader.py` (new), `fixtures/optimized_grader_prompt.txt` (new), `tests/*`, `PLAN.md`.
+
+**Done when:** reflexion revises weak grades (flag-gated, offline-tested); the planner replans
+remaining sessions on live divergence (bounded, offline-tested); the grader loads a DSPy-optimized
+prompt artifact with graceful fallback; lint + pytest pass; (server) one live DSPy optimization run
++ a before/after `aggregate_mae` delta sanity-checked.
+
+**Skills needed:** Reflexion (generate/critique/revise), plan-and-execute/replanning, DSPy prompt
+optimization + Bedrock LM adapter, the offline-artifact vs. runtime split — verified at build.
+
+---
+
+## Phase 16 — Advanced memory  *(Capability: MEMORY architecture — typing · reflection · semantic recall)*
+
+**Goal:** upgrade Phase 4's flat weak-areas store into a real memory architecture — **memory
+typing** (episodic / semantic / procedural), a **reflection/consolidation** agent that summarizes
+sessions into higher-level insights, **semantic memory search** (recall by meaning, not dump-all),
+and **decay / conflict resolution** — all on the existing `InMemoryStore` seam (memory.py:70).
+
+**Why it exists / what it teaches:** memory is the hottest hard problem in agents. Phase 4 taught
+checkpointer-vs-store; Phase 16 teaches memory as an **architecture**, not a dict.
+
+**Owner decisions / stack (verify at build per rule #7):**
+- Reuse `loop/memory.py` `InMemoryStore` + the `("loop","users")[user_id]` namespace
+  (coach.py:66, planner.py:96). Expand from `{weak_areas, session_count}` to typed sub-namespaces:
+  `("loop","users",user_id,"episodic"|"semantic"|"procedural")`, with **backward-compatible reads**
+  of the old flat shape.
+- **Semantic store search:** LangGraph store index/embeddings search (`store.search` with an index
+  config) — verify the `InMemoryStore` semantic-search API on installed `langgraph`; use fake
+  embeddings offline (the Phase 8 `get_embeddings` seam + `DeterministicFakeEmbedding`).
+- **Reflection:** a `reflect` node (LLM) that reads recent **episodic** memories and writes
+  consolidated **semantic/procedural** insights; runs at a session/curriculum boundary, bounded.
+- **Decay/conflict:** a **deterministic** policy (session-count staleness TTL; newer/higher-
+  confidence wins on contradiction) so it stays laptop-testable.
+
+**Concepts to teach:** **episodic** (what happened) vs **semantic** (durable facts about the user)
+vs **procedural** (how to coach this user) memory; **reflection/consolidation** (the Generative-
+Agents pattern — memory that *thinks*, turning raw episodes into insight); **semantic recall**
+(retrieve relevant memories by embedding, not load-everything); **memory lifecycle** (decay +
+conflict resolution) as first-class concerns.
+
+**Sub-steps (each = one turn: teach → code → test → pause):**
+- **16a — Memory typing.** Refactor the store schema into episodic / semantic / procedural
+  namespaces. `coach._persist_weak_areas` (coach.py:43) → typed writes; `planner._get_stored_weak_areas`
+  (planner.py:77) → typed reads; keep back-compat reads of the old `{weak_areas}` shape. Tests:
+  typed write/read round-trips; migration from the flat shape.
+- **16b — Reflection / consolidation.** Add `loop/nodes/reflect.py`: read episodic memories, write
+  consolidated semantic+procedural insights via an LLM; wire at the curriculum boundary, bounded;
+  `planner` reads the consolidated semantic memory. Config: `reflection_enabled`. Tests: a stubbed
+  reflection turns 3 episodes into 1 insight; the planner prompt consumes it.
+- **16c — Semantic recall + decay/conflict.** Embed semantic memories; recall top-k by similarity
+  (`store.search`) instead of dumping all. Add the deterministic decay/conflict policy. Config:
+  `memory_recall_k`, `memory_ttl_sessions`. Tests: semantic recall ranks the relevant memory (fake
+  embeddings); stale memory decays out; contradictory facts resolve to the newer.
+
+**Task checklist:** `loop/memory.py` (typed namespaces + `store.search` helper); `loop/nodes/coach.py`
+(typed writes); `loop/nodes/planner.py` (typed + semantic reads); `loop/nodes/reflect.py` (new);
+`loop/schemas.py` (memory-item models); `loop/config.py` (reflection/recall/ttl knobs);
+`tests/test_memory.py` + new.
+
+**Files touched:** `loop/memory.py`, `loop/nodes/{coach,planner,reflect}.py`, `loop/schemas.py`,
+`loop/config.py`, `tests/*`, `PLAN.md`.
+
+**Done when:** memories are typed (episodic/semantic/procedural) with back-compat; a reflection
+agent consolidates episodes into insights that demonstrably shape the next plan; recall is semantic
+(fake-embeddings offline); decay/conflict is deterministic and tested; lint + pytest pass; (server)
+a live reflection run sanity-checked.
+
+**Skills needed:** memory typing, reflection/consolidation, LangGraph store semantic search, memory
+lifecycle (decay/conflict) — verified at build against installed `langgraph`.
+
+---
+
+## Phase 17 — Eval-in-CI, agent simulation & red-teaming  *(Capability: EVAL/SAFETY at prod grade)*
+
+**Goal:** turn the Phase 6 eval scripts into a **CI regression gate**, add **agent-simulation
+testing** (an LLM "synthetic candidate" plays full sessions end-to-end), and an **automated
+red-team suite** (jailbreak/injection) that extends the Phase 10 guardrails.
+
+**Why it exists / what it teaches:** treating agent quality like a test suite — with a gate that
+fails the build when grading agreement regresses — is a standout senior signal and plays straight
+to the owner's CI/CD strength. Agent simulation and red-teaming are techniques almost nobody
+demonstrates.
+
+**Owner decisions / stack (verify at build per rule #7):**
+- **Two-tier eval gate** (resolves "evals are model-dependent vs. offline gate"): **(1) offline
+  deterministic tier** in `tests/` — stubbed model, asserts the node trajectory via
+  `evals/trajectory_check.assert_trajectory` (trajectory_check.py:71) + grader determinism on
+  fixtures — runs on **every CI commit**; **(2) live tier** — `evals/run_grader_eval.run_eval`
+  (run_grader_eval.py:144) scores agreement/`aggregate_mae` against `grader_labels.json` and exits
+  non-zero if agreement drops below a threshold — runs **nightly on the server**, not the laptop
+  gate. `evals/ci_gate.py` orchestrates + thresholds.
+- **Agent simulation:** a `SimulatedCandidate` that auto-answers the interviewer's `interrupt()`s,
+  driving the whole graph unattended. **Offline:** a deterministic scripted candidate (canned
+  answers per modality). **Live:** an LLM candidate (server).
+- **Red-team:** a corpus run through `guardrails.detect_injection` + end-to-end through the intake/
+  answer gates, asserting flag/redact. Deterministic, offline. Optional **Llama Guard** seam.
+
+**Concepts to teach:** an **eval regression gate** (agent quality as a build check) and why it must
+be split into a deterministic offline tier + a probabilistic live tier; **agent simulation** (an
+LLM drives your agent end-to-end to surface flow bugs no unit test catches); **red-teaming**
+(offensive testing of guardrails) as the complement to Phase 10's defensive redaction/flagging.
+
+**Sub-steps (each = one turn: teach → code → test → pause):**
+- **17a — Eval-in-CI gate.** `evals/ci_gate.py`: the **offline deterministic tier**
+  (`assert_trajectory` + grader-on-fixtures, no model) as a pytest-runnable gate; the **live tier**
+  wraps `run_eval` with a `min_agreement` threshold that exits non-zero on regression. Document the
+  GitHub Actions wiring (offline tier every commit; live tier nightly). Tests: the gate passes on
+  good fixtures and fails on an injected regression fixture.
+- **17b — Agent simulation.** `evals/simulate_session.py`: a `SimulatedCandidate` that resumes the
+  graph's answer interrupts automatically; run a full multi-session sim end-to-end. Offline scripted
+  candidate; assert the full trajectory + that grades/verdict are produced. Tests: a deterministic
+  sim completes a 2-session run offline.
+- **17c — Red-team suite.** `evals/redteam.py` + `fixtures/redteam_prompts.json`: run
+  injection/jailbreak strings through `detect_injection` and end-to-end; assert flagging. Optional
+  Llama Guard seam in `guardrails.py`. Tests: known attacks flagged; clean inputs pass unchanged.
+
+**Task checklist:** `evals/ci_gate.py` (new); `evals/simulate_session.py` (new); `evals/redteam.py`
+(new); `fixtures/redteam_prompts.json` (new); `loop/guardrails.py` (Llama Guard seam);
+`tests/test_evals.py` + new; `.github/workflows/*` (documented, not necessarily run here).
+
+**Files touched:** `evals/{ci_gate,simulate_session,redteam}.py` (new), `fixtures/redteam_prompts.json`
+(new), `loop/guardrails.py`, `tests/*`, `.github/workflows/` (doc), `PLAN.md`.
+
+**Done when:** an offline deterministic eval gate runs in CI on every commit and fails on a seeded
+regression; a live agreement-threshold gate is wired for nightly; an agent simulation drives full
+sessions unattended (scripted offline / LLM live); a red-team suite flags known attacks and passes
+clean inputs; lint + pytest pass; (server) the live tiers sanity-checked.
+
+**Skills needed:** CI eval gates (deterministic + probabilistic tiers), agent simulation harnesses,
+red-teaming / guardrail testing, reusing `run_grader_eval`/`trajectory_check` — verified at build.
+
+---
+
+## Phase 18 — Production infrastructure & real data  *(Capability: PRODUCTION — Track G core)*
+
+**Goal:** replace the v1 in-memory / keyless / fixture backends with production backends, **each
+behind the seam the project already established**, so the graph and node code never change. This
+is the "make it real / deploy it" phase — the owner's AWS/backend edge. **This phase formalizes
+the old "v2 / future enhancements" backlog into an executable phase.**
+
+**Ordering decision (owner-delegated, 2026-07-18):** this phase runs **AFTER** the concept-heavy
+frontier phases (12 MCP, 13 multi-agent, and tracks C/D/E/H), **not before Phase 12.** The infra
+items are *plumbing swaps behind seams that already exist* — solid engineering, but almost zero
+*new* agentic-AI concepts — and nothing depends on them either way (MCP and multi-agent run fine
+on `InMemoryVectorStore` / `SqliteSaver` / Bedrock). They are the backbone of the production track
+(**Track G**) and earn their keep at deploy time. **Overridable:** pull this phase forward without
+touching any other phase if you decide to deploy early — that's the whole point of the seams.
+
+**Why it exists / what it teaches:** productionizing an agent (durable multi-user state, a real
+vector DB, real external data, a self-hostable model) is the highest-paying intersection of the
+owner's existing skills with agentic AI, and proves the seam discipline end-to-end.
+
+**Concepts to teach:** connection-string config & pooling; durable checkpointer/store semantics
+vs. in-memory; pgvector as a real ANN index vs. `InMemoryVectorStore`; a DAO swap from fixtures to
+a real store without touching callers; why the `api.py` pending-command dict must also move to a
+durable store for true cross-restart resume.
+
+**Sub-steps (each = one turn: teach → code → test → pause) — one seam per step:**
+
+- **18a — Postgres checkpointer + store.** Swap `memory.py::_make_checkpointer()` / the `_store`
+  singleton (memory.py:69-70; v2 comment at memory.py:68) to `PostgresSaver` / `PostgresStore`,
+  reading a new `pg_conn_string` config knob (no such field exists yet — must add). Also move
+  `api.py`'s process-local `_pending` / `_budgets` dicts (api.py:91-98 caveat: "v2 fix: store
+  pending commands in Redis or a DB table") to a durable store so resume survives a restart.
+  Tests: durable resume across a simulated restart (offline — a temp DB or the existing SQLite
+  path as the laptop stand-in; Postgres itself is a server activity).
+- **18b — pgvector.** Swap `InMemoryVectorStore` → `PGVector` in `retrieval.py:74` **only** (seam
+  comment retrieval.py:18-19); `retrieve_questions()` signature + all callers unchanged. Reuses the
+  `get_embeddings()` factory. Tests: retrieval still returns the documented shape (offline — fake
+  embeddings; a real pgvector run is a server activity).
+- **18c — Real search (Tavily).** Implement `_tavily_search()` (search.py:58, currently
+  `NotImplementedError` at search.py:65) behind the existing auto-switch on `tavily_api_key`
+  (config.py:62). Tests: stub the Tavily client (offline), same discipline as the `ddgs` stub.
+- **18d — Ollama model + embeddings.** Fill the two Ollama seams: `models.py:34` and
+  `embeddings.py:31` (both raise `NotImplementedError` today), selected by `model_provider`
+  (config.py:44). Tests: factory returns the Ollama model when `model_provider="ollama"` (offline
+  — assert construction, don't call it).
+- **18e — Real data (JD ingest + large question bank).** Swap the `tools.py` fixture DAO
+  (tools.py:4-6 seam) to read questions / rubrics / reference answers from Postgres (pairs with
+  18b's pgvector index); add a real JD-upload path at the seam noted in graph.py:62-65 (the
+  `intake` redact/flag path already treats JD/profile as untrusted input). Tests: DAO returns the
+  same shapes from the new backend (offline with a seeded temp DB / fixture adapter).
+
+**Files touched:** `loop/{memory,api,retrieval,models,embeddings,tools,config}.py`,
+`loop/research/search.py`, `pyproject.toml` (new deps: `langgraph-checkpoint-postgres`,
+`langchain-postgres`/pgvector, `langchain-ollama`, `langchain-tavily` — verify + pin at build),
+`tests/*`, `PLAN.md`.
+
+**Done when:** each backend swap is done behind its existing seam with **no change to the graph or
+any calling node**; every swap is laptop-testable offline (stubbed clients / temp DB / fake
+embeddings); lint + pytest pass; live Postgres / pgvector / Tavily / Ollama runs are sanity-checked
+as server activities.
+
+**Skills needed:** `PostgresSaver` / `PostgresStore`, `PGVector`, `langchain-ollama`,
+`langchain-tavily` (all verified at build); connection config; the DAO/repository swap pattern.
 
 ---
 
@@ -848,6 +1500,41 @@ thread listing; shaping a nested JSON response in FastAPI; vanilla JS `fetch` + 
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 12a+12b — 2026-07-19
+**Built:** `loop/mcp_server.py` — a `FastMCP("loop")` server exposing four thin `@mcp.tool()`
+wrappers (`list_questions`, `search_questions`, `get_rubric`, `get_reference_answer`), each a
+one-line delegation to an already-tested `loop/tools.py` function. `loop/research/mcp_client.py`
+— `load_mcp_tools()` builds a `MultiServerMCPClient` from the new `settings.mcp_server_configs`
+allow-list (empty by default) and returns its tools as `BaseTool`s; empty config short-circuits
+to `[]` before importing `langchain_mcp_adapters` or spawning anything. `loop/nodes/research.py`
+merges them into the Phase 9 ReAct agent's tool list: `tools=[search_web, *load_mcp_tools()]`.
+New deps `mcp==1.28.1` + `langchain-mcp-adapters==0.3.0`. `tests/test_mcp.py` (12 tests) +
+`tests/fixtures/mock_mcp_server.py` (a second tiny `FastMCP` fixture server, spawned as a real
+subprocess). 254/254 tests, 0 lint errors. Docs: `docs/09-15` (MCP protocol, roles/primitives,
+transports, wire protocol, FastMCP internals, the async event loop, security/bounded agency) +
+`doc/phase-12-mcp-interop.md` (build walkthrough).
+
+**Key decisions / lessons:**
+- **Real bug found, not just a design choice made (CLAUDE.md rule #7 in action):** the PLAN
+  framed the sync/async crossing as two equally-valid options. Empirically testing both showed
+  only one works: `agent.invoke()` (the original Phase 9 call) raises `NotImplementedError:
+  StructuredTool does not support sync invocation` the moment an MCP-loaded (async-only) tool is
+  actually called, because LangGraph's `ToolNode` tries its sync path first and does not fall
+  back to async; making `research()` itself `async def` raises `TypeError: No synchronous
+  function provided` the instant the (sync-invoked) parent graph reaches it. Fixed by keeping
+  `research()` sync but swapping its internal call to `asyncio.run(agent.ainvoke(...))` —
+  verified this doesn't change Phase 9's existing behavior (a pure-sync tool list runs
+  identically through `ainvoke()`).
+- MCP-over-stdio is a **local subprocess**, not a network call — so unlike Tavily search or a
+  live Bedrock call, it stays fully inside the laptop offline test gate. 12a tests call the
+  `FastMCP` instance's own async methods in-process; 12b's `tests/fixtures/mock_mcp_server.py` is
+  spawned as a genuine subprocess by the real `MultiServerMCPClient`, proving the whole wire
+  protocol round-trips, not just the Python-level plumbing.
+- `mcp_server_configs` follows the same "opt-in, feature-off by default" pattern as Phase 10's
+  `fallback_model_id` and Phase 9b's `company` — with no servers configured, the research node's
+  tool list stays byte-for-byte the Phase 9 flow.
+- Full write-up: [`doc/phase-12-mcp-interop.md`](doc/phase-12-mcp-interop.md).
 
 ### Phase 11a+11b — 2026-07-18
 **Built:** `loop/api.py` — `GET /sessions` (lists past sessions, newest first) and

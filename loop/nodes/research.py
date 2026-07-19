@@ -20,9 +20,37 @@ favor of langchain.agents.create_agent (already present via langchain==1.3.9).
 Verified via inspect.signature()/help(): response_format=<PydanticModel>
 populates result["structured_response"] with a validated instance — the
 same mechanism the deprecated function offered.
+
+Phase 12b: the agent's tool list is no longer hard-coded to [search_web] —
+load_mcp_tools() (loop/research/mcp_client.py) appends any tools loaded from
+externally-configured MCP servers. With no MCP servers configured (the
+default), load_mcp_tools() returns [] and this node's behavior is
+byte-for-byte the Phase 9 flow.
+
+Sync/async boundary (resolved empirically, not from memory — CLAUDE.md rule
+#7): tools loaded via langchain-mcp-adapters only implement an ASYNC run
+method (StructuredTool._arun) — calling agent.invoke() (sync) on an agent
+that holds one raises "StructuredTool does not support sync invocation" the
+moment the model calls that tool, because LangGraph's ToolNode tries its
+sync path first and does not fall back to async. Making research() itself
+`async def` is NOT an option either: a plain StateGraph node registered as a
+coroutine raises "No synchronous function provided" the instant the *parent*
+graph is invoked via the sync graph.stream()/.invoke() that api.py already
+uses everywhere else — confirmed by constructing a minimal graph with an
+async node and calling compiled.invoke() on it.
+The fix that keeps both constraints satisfied: research() stays a plain sync
+function (so the parent graph's sync invocation is untouched), but internally
+calls agent.ainvoke() — not agent.invoke() — wrapped in asyncio.run(). This
+works identically for pure-sync tool lists (verified: a sync-only tool
+list runs fine through .ainvoke(), since BaseTool provides a default async
+wrapper for a sync-only tool) and for mixed sync+async-only tool lists (the
+MCP case), so Phase 9's existing behavior is unchanged when no MCP servers
+are configured.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
@@ -30,6 +58,7 @@ from langchain_core.messages import HumanMessage
 from loop.config import settings
 from loop.models import get_chat_model
 from loop.observability import get_langfuse_callback
+from loop.research.mcp_client import load_mcp_tools
 from loop.research.tools import search_web
 from loop.schemas import CompanyResearch
 
@@ -55,7 +84,7 @@ def research(state: dict) -> dict:
 
     agent = create_agent(
         model=get_chat_model(),
-        tools=[search_web],
+        tools=[search_web, *load_mcp_tools()],
         system_prompt=_SYSTEM_PROMPT,
         response_format=CompanyResearch,
     )
@@ -68,9 +97,12 @@ def research(state: dict) -> dict:
         "recursion_limit": settings.research_max_iterations,
     }
 
-    result = agent.invoke(
-        {"messages": [HumanMessage(content=f"Research the company: {company}")]},
-        config=config,
+    # agent.ainvoke() (not .invoke()) — see the sync/async boundary note above.
+    result = asyncio.run(
+        agent.ainvoke(
+            {"messages": [HumanMessage(content=f"Research the company: {company}")]},
+            config=config,
+        )
     )
 
     structured: CompanyResearch = result["structured_response"]

@@ -233,10 +233,14 @@ class TestGraphHasResearchNode:
 class TestResearchNode:
     def _make_fake_agent(self, structured_response, captured: dict):
         """Build a fake object matching create_agent()'s return shape closely
-        enough for the research() node: just needs .invoke(input, config)."""
+        enough for the research() node: just needs .ainvoke(input, config).
+
+        Phase 12b switched research() from agent.invoke() to
+        asyncio.run(agent.ainvoke(...)) — see loop/nodes/research.py's
+        module docstring for why (MCP-loaded tools are async-only)."""
 
         class _FakeAgent:
-            def invoke(self, input_, config=None):
+            async def ainvoke(self, input_, config=None):
                 captured["input"] = input_
                 captured["config"] = config
                 return {"structured_response": structured_response}

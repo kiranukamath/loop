@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     # Enforced by loop/budget.py via a callback attached to each graph run.
     max_session_tokens: int = 50_000
 
+    # ── External MCP servers (Phase 12b) ──────────────────────────────────────
+    # Allow-list of external MCP servers the research agent may load tools
+    # from, keyed by a name you choose: {"command": ..., "args": [...],
+    # "transport": "stdio"}. Empty (the default) = feature off -- the research
+    # agent's tool list stays byte-for-byte the Phase 9 flow, and
+    # loop/research/mcp_client.py never spawns a subprocess.
+    # Only stdio is supported in v1 -- remote HTTP/SSE servers are a v2 seam,
+    # same treatment as the Tavily search provider and the Ollama model swap.
+    mcp_server_configs: dict[str, dict[str, object]] = {}
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
