@@ -174,6 +174,15 @@ class Settings(BaseSettings):
     # recall -- a simple, deterministic decay policy, no model call.
     memory_ttl_sessions: int = 10
 
+    # ── Guardrails provider (Phase 17c) ───────────────────────────────────────
+    # "regex" (default) is the Phase 10b heuristic detector in loop/guardrails.py
+    # -- free, instant, offline-testable. "llama_guard" is a v2 seam (mirrors
+    # model_provider/models.py): swapping to it would route detect_injection()
+    # through a real Llama Guard model call instead. Not implemented in v1 --
+    # selecting it raises NotImplementedError, same discipline as the Ollama
+    # seam in models.py.
+    guardrail_provider: Literal["regex", "llama_guard"] = "regex"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -141,14 +141,20 @@ def aggregate_mae(*, item_results: list[Any], **kwargs: Any) -> list[dict]:
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 
-def run_eval(run_name: str | None = None) -> None:
-    """Pull the dataset and run the experiment."""
+def run_eval(run_name: str | None = None) -> Any:
+    """Pull the dataset and run the experiment.
+
+    Returns the `run_experiment()` result (so Phase 17a's live CI-gate tier
+    can inspect result.run_evaluations for the agreement threshold check), or
+    None if Langfuse isn't configured. Existing callers (just __main__ below)
+    ignored the return value already, so adding one is not a breaking change.
+    """
     from loop.observability import get_langfuse_client
 
     client = get_langfuse_client()
     if client is None:
         print("Langfuse not configured — set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY in .env")
-        return
+        return None
 
     dataset = client.get_dataset(_DATASET_NAME)
     print(f"Dataset '{_DATASET_NAME}': {len(dataset.items)} items")
@@ -185,6 +191,7 @@ def run_eval(run_name: str | None = None) -> None:
 
     client.flush()
     print("\nScores pushed to Langfuse.")
+    return result
 
 
 if __name__ == "__main__":

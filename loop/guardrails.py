@@ -1,5 +1,6 @@
 """
 Guardrails — Phase 10b: PII redaction + prompt-injection detection.
+Phase 17c adds a swappable detection provider (the "Llama Guard seam").
 
 Every piece of human-supplied text (JD, profile, interview answers) is
 untrusted input, exactly like a request body hitting your service. Two
@@ -13,11 +14,21 @@ stored in state or sent to a model:
 
 Both are pure functions — no model call, so they're free and instant, and
 fully covered by tests/test_guardrails.py without touching the network.
+
+Phase 17c — provider seam:
+  detect_injection() dispatches on settings.guardrail_provider, exactly like
+  loop/models.py's get_chat_model() dispatches on settings.model_provider.
+  "regex" (default) is the heuristic check below. "llama_guard" is a v2 seam
+  for routing the same check through a real Llama Guard model call instead —
+  selecting it raises NotImplementedError until that's built, so v1 behavior
+  is unchanged unless a caller deliberately opts in via .env.
 """
 
 from __future__ import annotations
 
 import re
+
+from loop.config import settings
 
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 
@@ -59,7 +70,27 @@ def redact_pii(text: str) -> str:
 
 
 def detect_injection(text: str) -> bool:
-    """Return True if `text` matches a known prompt-injection pattern."""
+    """Return True if `text` looks like a prompt-injection/jailbreak attempt.
+
+    Dispatches on settings.guardrail_provider. Callers never construct a
+    detector directly — same discipline as loop/models.py's get_chat_model().
+    """
+    if settings.guardrail_provider == "regex":
+        return _regex_detect_injection(text)
+
+    # v2 seam — not implemented yet
+    if settings.guardrail_provider == "llama_guard":
+        raise NotImplementedError(
+            "Llama Guard provider is a v2 feature. "
+            "Set GUARDRAIL_PROVIDER=regex in your .env for now."
+        )
+
+    raise ValueError(f"Unknown guardrail provider: {settings.guardrail_provider!r}")
+
+
+def _regex_detect_injection(text: str) -> bool:
+    """The Phase 10b heuristic: return True if `text` matches a known
+    prompt-injection pattern."""
     if not text:
         return False
     return any(pattern.search(text) for pattern in _INJECTION_PATTERNS)

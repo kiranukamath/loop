@@ -1,0 +1,51 @@
+name: Eval gate
+
+# Phase 17a — two-tier eval-in-CI gate (see evals/ci_gate.py's module
+# docstring for the full rationale).
+#
+#   offline-eval : Tier 1, deterministic, no secrets, no network. Runs
+#                  `uv run pytest tests/test_ci_gate.py` (plus the rest of
+#                  the suite) on every push/PR — this IS the laptop test
+#                  gate CLAUDE.md requires, just running in CI too.
+#   nightly-eval : Tier 2, live. Runs `python -m evals.ci_gate --tier live`
+#                  on a schedule only, needs Bedrock + Langfuse credentials,
+#                  and fails the scheduled run (never a commit/PR) if grader
+#                  agreement has regressed below the threshold.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *" # nightly, 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  offline-eval:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # No AWS/Langfuse secrets needed -- every test in tests/ is offline
+      # (stubbed models, DeterministicFakeEmbedding, stubbed reranker/search).
+      - run: uv run pytest
+
+  nightly-eval:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: nightly-eval # holds the Bedrock/Langfuse secrets below
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - name: Live grader-agreement gate
+        env:
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+        run: uv run python -m evals.ci_gate --tier live --min-agreement 0.7

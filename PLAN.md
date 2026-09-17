@@ -32,7 +32,7 @@ completes.
 | 14 | Advanced RAG (Track C) | reranking · CRAG · query rewriting | ✅ done & approved (14a, 14b, 14c) | — |
 | 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ✅ done & approved (15a, 15b, 15c) | — |
 | 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ✅ done & approved (16a, 16b, 16c) | — |
-| 17 | Eval-in-CI (Track H) | regression gate · agent simulation · red-team | ⬜ not started (v2) — spec'd | — |
+| 17 | Eval-in-CI (Track H) | regression gate · agent simulation · red-team | ✅ done & approved (17a, 17b, 17c) | — |
 | 18 | Production infra & real data (Track G) | pgvector · Postgres · Ollama · real search · real data | ⬜ not started (v2) — spec'd | — |
 | 19 | Voice / multimodal (Track F) | STT+TTS · diagram grading · code sandbox | ⬜ backlog (v2, optional) | — |
 
@@ -1519,6 +1519,77 @@ as server activities.
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 17a+17b+17c — 2026-09-17
+**Built:** `evals/ci_gate.py` (17a) — the two-tier eval-in-CI gate. Tier 1
+(`check_offline_gate`, deterministic, no live model calls) reuses
+`evals.trajectory_check.assert_trajectory` against a fully-stubbed graph run
+driven through all three interrupts, plus `check_grader_determinism_gate`:
+for each `fixtures/grader_labels.json` item, checks the label's own
+`[score_min, score_max]` band is self-consistent, then calls
+`loop.nodes.grader.grader()` twice with a fixed stubbed model and asserts
+byte-identical output (catches node-wiring regressions, not live grading
+accuracy). Tier 2 (`check_live_gate`) wraps `evals.run_grader_eval.run_eval`
+(now returns its `run_experiment()` result instead of `None`, a
+backward-compatible addition) and raises `GateFailure` if the pushed
+`agreement_rate` run-level score drops below `min_agreement` — needs Bedrock
++ Langfuse, so it's wired as a nightly job, never the per-commit gate. Added
+`.github/workflows/eval-gate.yml`: `offline-eval` runs `uv run pytest` (incl.
+`tests/test_ci_gate.py`) on every push/PR with no secrets; `nightly-eval`
+runs `python -m evals.ci_gate --tier live` on a cron schedule with
+Bedrock/Langfuse secrets. `tests/test_ci_gate.py` covers the good path plus
+two seeded regressions (an inconsistent score band; a grader that leaks
+non-determinism across calls) and the live tier stubbed via
+`evals.ci_gate.run_eval` (no network in `tests/`).
+
+**Built:** `evals/simulate_session.py` (17b) — `SimulatedCandidate`, an
+offline scripted agent that auto-resumes every `interrupt()` Loop's graph
+raises (`approve_plan` / `answer_question` / `approve_verdict`) with a
+canned response, via `run_to_completion()`'s invoke-until-no-interrupt loop
+(bounded by `max_turns` against a runaway interrupt loop). `stub_llm_nodes()`
+stubs only the LLM-calling nodes (planner/coach/readiness's model, grader as
+a whole node) — `plan_approval`, both interviewer interrupts, the real
+multi-session loop, and readiness's interrupt are all exercised as real
+graph mechanics, exactly like a live UI would drive them.
+`run_simulated_session()` deliberately compiles with a **fresh**
+`MemorySaver()`/`InMemoryStore()` per call rather than
+`loop.memory.compile_with_memory()`'s process-wide singletons — that
+singleton reads `settings.db_path`, so on a machine whose `.env` points it
+at a real `SqliteSaver` file, two calls sharing a `thread_id` would resume
+each other's persisted state across separate test runs (found this the hard
+way: a first draft using `compile_with_memory()` produced 4/6/8 accumulated
+grades instead of 2 depending on what had run against that file before).
+`run_multi_session_simulation()` opts back into shared cross-session memory
+by passing one checkpointer/store across several `run_simulated_session()`
+calls, mirroring `loop/graph.py`'s own multi-session demo. Deterministic 2-
+session offline run: `uv run python -m evals.simulate_session`.
+
+**Built:** `evals/redteam.py` + `fixtures/redteam_prompts.json` (17c) — a
+20-item red-team corpus (14 known prompt-injection/jailbreak strings
+covering every `loop/guardrails.py` regex pattern, 6 benign candidate-answer-
+shaped strings, one attack also carrying PII) with per-item
+`expect_flag`/`expect_pii` labels. `check_guardrails_against_corpus` runs
+each item through `detect_injection()`/`redact_pii()` directly;
+`check_intake_gate_against_corpus` / `check_answer_gate_against_corpus`
+mirror `loop.graph.intake()`'s and `loop.nodes.interviewers._ask_question()`'s
+flag-then-redact sequence end-to-end. Also added the **Llama Guard seam**:
+`loop/guardrails.py`'s `detect_injection()` now dispatches on a new
+`settings.guardrail_provider` field (`"regex"` default, `"llama_guard"`
+raises `NotImplementedError`) — same v2-seam discipline as
+`loop/models.py`'s `model_provider`/Ollama seam. `tests/test_redteam.py`
+covers the corpus validity, both end-to-end gates, and the seam's
+not-implemented/unknown-provider error paths.
+
+**Key decisions:** kept `tests/` fully offline per CLAUDE.md's absolute
+laptop gate — Tier 2 of the eval gate and a "live LLM candidate" for 17b are
+explicitly documented as server/nightly activities, not exercised by
+`uv run pytest`; reused `assert_trajectory`/`run_eval` rather than
+duplicating them (per the phase spec); discovered and fixed a real
+process-singleton test-isolation hazard along the way (see 17b above) rather
+than working around it with a unique-thread-id hack.
+
+**Test count:** 378 passed (up from ~330 baseline before this phase), ruff
+clean.
 
 ### Phase 16a+16b+16c — 2026-09-17
 **Built:** `loop/memory.py` — typed sub-namespaces per user (16a):
