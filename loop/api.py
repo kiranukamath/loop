@@ -279,7 +279,11 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
                         continue  # skip internal LangGraph nodes
 
                     payload = {"type": "node", "node": node}
-                    payload.update(_safe_payload(updates))
+                    # Phase 16b: a node that returns {} (e.g. reflect() when
+                    # reflection_enabled is off) streams as `updates=None`
+                    # under stream_mode="updates" -- treat that the same as
+                    # an empty update dict rather than crashing.
+                    payload.update(_safe_payload(updates or {}))
                     payload["tokens_used"] = budget.tokens_used
                     payload["cost_usd"] = round(budget.cost_usd, 6)
                     yield _sse(payload)

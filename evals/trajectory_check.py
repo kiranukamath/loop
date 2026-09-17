@@ -45,6 +45,8 @@ EXPECTED_TRAJECTORY_SUFFIX = [
     "coach",
     "advance_session",
     "readiness",
+    "reflect",  # Phase 16b: curriculum-boundary consolidation, always in the
+    # topology (no-op when settings.reflection_enabled is off)
 ]
 
 

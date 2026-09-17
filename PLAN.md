@@ -31,7 +31,7 @@ completes.
 | 13 | Multi-agent orchestration | supervisor · parallel (Send) · handoffs | ✅ done & approved (13a, 13b, 13c) | — |
 | 14 | Advanced RAG (Track C) | reranking · CRAG · query rewriting | ✅ done & approved (14a, 14b, 14c) | — |
 | 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ✅ done & approved (15a, 15b, 15c) | — |
-| 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ⬜ not started (v2) — spec'd | — |
+| 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ✅ done & approved (16a, 16b, 16c) | — |
 | 17 | Eval-in-CI (Track H) | regression gate · agent simulation · red-team | ⬜ not started (v2) — spec'd | — |
 | 18 | Production infra & real data (Track G) | pgvector · Postgres · Ollama · real search · real data | ⬜ not started (v2) — spec'd | — |
 | 19 | Voice / multimodal (Track F) | STT+TTS · diagram grading · code sandbox | ⬜ backlog (v2, optional) | — |
@@ -1519,6 +1519,77 @@ as server activities.
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 16a+16b+16c — 2026-09-17
+**Built:** `loop/memory.py` — typed sub-namespaces per user (16a):
+`episodic_namespace`/`semantic_namespace`/`procedural_namespace` returning
+`("loop","users",user_id,"episodic"|"semantic"|"procedural")`, replacing the Phase 4 flat
+`("loop","users")[user_id] -> {weak_areas, session_count}` shape. `get_weak_areas_state()`
+reads the typed `"semantic"` namespace's `"weak_areas"` key first and falls back to the old
+flat shape only when nothing typed exists yet (back-compat read, never a back-compat write —
+every write migrates forward); `put_weak_areas_state()` and `put_episode()` are the typed
+writers `coach.py` now calls. `_make_store()` builds the process-level `InMemoryStore` WITH
+an index config (`dims`/`embed`/`fields=["text"]`) so `store.search(..., query=...)` does
+real cosine-similarity ranking (verified against the installed `langgraph==1.2.5` source —
+`langgraph/store/base/__init__.py`'s `IndexConfig`/`BaseStore.search`, and
+`langgraph/store/memory/__init__.py`'s `InMemoryStore.__init__`); `_LazyEmbeddings` defers
+the actual `get_embeddings()` call until first real use, since the store singleton is built
+at `loop.graph` import time — before any test fixture can monkeypatch it. `resolve_conflict()`
++ `put_semantic_insight()` (16c): a deterministic conflict policy — newer `created_session_count`
+wins, ties broken by higher `confidence` — keyed by a slugified "topic" so re-asserting the
+same fact updates it rather than piling up duplicates. `recall_semantic_memories()` (16c):
+top-k semantic recall via `store.search()`, then a deterministic decay filter (drop anything
+older than `memory_ttl_sessions`). `loop/nodes/coach.py` — `_persist_weak_areas()` now writes
+the merged `weak_areas` fact to the typed semantic namespace AND one immutable episodic
+record per session (16a). `loop/nodes/planner.py` — `_get_stored_weak_areas()` goes through
+`get_weak_areas_state()` (typed + back-compat); new `_get_semantic_insights()` recalls
+reflect()'s consolidated insights by embedding similarity and folds them into a new
+"Consolidated Insights" prompt section (16b/16c). `loop/nodes/reflect.py` (new, 16b): an LLM
+node (`ReflectionInsights` structured output, `loop/schemas.py`) that reads a bounded window
+(`_MAX_EPISODES = 10`) of recent episodic records and writes consolidated semantic insights
++ one evolving procedural `coaching_notes` entry; wired in `loop/graph.py` at the curriculum
+boundary (`readiness -> reflect -> END`), so it runs at most once per graph invocation.
+`loop/config.py` — `reflection_enabled` (default `False`), `memory_recall_k` (default 3),
+`memory_ttl_sessions` (default 10), `embedding_dims` (default 1024, Titan v2's output size).
+`loop/api.py` — `_safe_payload(updates or {})`: a node returning `{}` (reflect, when
+disabled) streams as `updates=None` under `stream_mode="updates"`; guarded rather than
+crashing the SSE stream. `evals/trajectory_check.py` — `EXPECTED_TRAJECTORY_SUFFIX` now ends
+`..., "readiness", "reflect"`. `tests/test_memory.py` (typed namespaces, back-compat
+migration, conflict resolution, semantic recall + decay, all offline), `tests/test_reflect.py`
+(new — reflect's no-op conditions, consolidation, bounded window), `tests/conftest.py` —
+`stub_memory_embeddings` autouse fixture (patches `loop.memory.get_embeddings` with
+`DeterministicFakeEmbedding`, mirroring the existing `stub_embeddings` fixture for
+`loop.retrieval`) — 349/349 total, 0 lint errors.
+
+**Key decisions / lessons:**
+- **`_LazyEmbeddings` instead of calling `get_embeddings()` at store-construction time:** the
+  store singleton is built the moment `loop.graph` is first imported (its
+  `compiled = compile_graph_with_memory()` runs at module load) — including during pytest
+  *collection*, before any autouse fixture has a chance to monkeypatch anything (confirmed:
+  `tests/test_multisession.py` imports `loop.graph` at module top level). Wrapping the real
+  factory in a thin `Embeddings` subclass that only calls it on the first actual
+  `embed_query`/`embed_documents` means whichever factory is current AT USE TIME wins —
+  Bedrock in production, `DeterministicFakeEmbedding` in tests — with zero import-time risk.
+  Same "seam, not a singleton" discipline `models.py`/`embeddings.py` already established.
+- **Weak areas are "semantic", episodes are "episodic," by design:** the merged `weak_areas`
+  list (a running fact) lives under `"semantic"`; each session's raw grading output (what
+  happened) lives under `"episodic"`, one immutable key per session. This is what makes
+  `reflect()` meaningful — it reads the raw episodic log and writes back a *different*,
+  higher-level kind of semantic memory (individually-embeddable insights), rather than just
+  re-deriving the same weak_areas list a second way.
+- **Conflict resolution is topic-keyed, not per-insight-id:** `put_semantic_insight()` keys
+  each insight by a slug of its own text. Two insights that slugify to the same key are
+  treated as re-assertions of the same fact, so `resolve_conflict()` (newer session wins,
+  higher confidence breaks ties) only ever fires on genuine restatements — unrelated insights
+  simply coexist as separate keys, left to decay out via TTL if they stop being reasserted.
+- **`reflect` is a permanent, always-no-op-until-opted-in node in the topology, not a
+  conditional edge:** it's wired unconditionally at `readiness -> reflect -> END` and
+  short-circuits to `{}` when `reflection_enabled` is `False` — matching how `panel_grading`/
+  `crag_enabled`/`reflexion_enabled` are all "always in the graph, no-op until flagged on"
+  rather than branched around. The one surprise this exposed: LangGraph's
+  `stream_mode="updates"` reports a node's empty-dict return as `updates=None`, which
+  `loop/api.py`'s SSE `_safe_payload()` wasn't guarding against — first time any node had
+  ever legitimately returned `{}`.
 
 ### Phase 15a+15b+15c — 2026-09-17
 **Built:** `loop/nodes/grader.py` — `_self_critique(grade, rubric, reference, answer_text,

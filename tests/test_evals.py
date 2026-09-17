@@ -257,8 +257,8 @@ class TestExtractTrajectory:
 
         traj = extract_trajectory(app, cfg)
         # intake, planner, plan_approval, session_router, interviewer,
-        # grader, coach, advance_session, readiness
-        assert len(traj) == 9
+        # grader, coach, advance_session, readiness, reflect (Phase 16b)
+        assert len(traj) == 10
 
     def test_trajectory_starts_with_intake(self, monkeypatch):
         app, cfg = self._run_stubbed_graph(monkeypatch)
@@ -267,12 +267,15 @@ class TestExtractTrajectory:
         traj = extract_trajectory(app, cfg)
         assert traj[0] == "intake"
 
-    def test_trajectory_ends_with_readiness(self, monkeypatch):
+    def test_trajectory_ends_with_reflect(self, monkeypatch):
+        """Phase 16b: reflect() always runs last in the topology (as a no-op
+        when reflection_enabled is off) -- readiness is now second-to-last."""
         app, cfg = self._run_stubbed_graph(monkeypatch)
         from evals.trajectory_check import extract_trajectory
 
         traj = extract_trajectory(app, cfg)
-        assert traj[-1] == "readiness"
+        assert traj[-1] == "reflect"
+        assert traj[-2] == "readiness"
 
     def test_trajectory_contains_all_expected_nodes(self, monkeypatch):
         app, cfg = self._run_stubbed_graph(monkeypatch)

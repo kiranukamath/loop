@@ -197,6 +197,32 @@ class SupervisorDecision(BaseModel):
     topics: list[str] = Field(description="Specific topics for this session")
 
 
+class ReflectionInsights(BaseModel):
+    """reflect() node's model output (Phase 16b).
+
+    Consolidates a window of recent episodic memories (per-session
+    weak-area updates, the raw log coach.py writes) into two kinds of
+    durable, higher-level memory -- the Generative-Agents "reflection"
+    pattern: memory that periodically *thinks* about itself instead of
+    just accumulating.
+    """
+
+    semantic_insights: list[str] = Field(
+        description=(
+            "Durable facts about the candidate's skill gaps distilled across "
+            "sessions, e.g. 'struggles with concurrency edge cases under time "
+            "pressure' -- not just a restatement of one session's weak areas"
+        )
+    )
+    procedural_insights: list[str] = Field(
+        description=(
+            "Durable guidance on HOW to coach this candidate going forward, "
+            "e.g. 'give more time on system design; responds well to concrete "
+            "before/after code examples'"
+        )
+    )
+
+
 class ReadinessVerdict(BaseModel):
     """Readiness node output — overall interview readiness after a session.
 

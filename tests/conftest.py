@@ -18,6 +18,7 @@ from langchain_core.embeddings.fake import DeterministicFakeEmbedding
 from langchain_core.runnables import RunnableLambda
 from langgraph.types import Command
 
+from loop.config import settings
 from loop.schemas import Feedback, Grade, PrepPlan, Session
 
 # ── Stub plan ─────────────────────────────────────────────────────────────────
@@ -74,6 +75,25 @@ def stub_embeddings(monkeypatch):
     retrieval_mod._build_index()
     yield
     retrieval_mod._vector_store = None
+
+
+@pytest.fixture(autouse=True)
+def stub_memory_embeddings(monkeypatch):
+    """Global offline gate for Phase 16c (semantic memory recall).
+
+    loop/memory.py's long-term store singleton is built at import time (see
+    loop.graph's `compiled = compile_graph_with_memory()`), before this
+    fixture can run -- that's exactly why its index config wraps
+    get_embeddings() in _LazyEmbeddings instead of calling it eagerly. This
+    fixture patches loop.memory.get_embeddings with a deterministic fake
+    BEFORE any test body runs, so by the time reflect()/planner() actually
+    write or search semantic memories, the lazy wrapper picks up the fake
+    instead of ever constructing a real BedrockEmbeddings client.
+    """
+    monkeypatch.setattr(
+        "loop.memory.get_embeddings",
+        lambda: DeterministicFakeEmbedding(size=settings.embedding_dims),
+    )
 
 
 @pytest.fixture(autouse=True)

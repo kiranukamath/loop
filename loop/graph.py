@@ -40,6 +40,13 @@ Phase 15b addition (flag-gated, default OFF, "fixed" orchestration_mode only):
     settings.replan_max_times → replan() re-invokes planner() on the remaining
     sessions only, then loops back to session_router like a normal "continue".
 
+Phase 16b addition (flag-gated, default OFF):
+  - readiness → reflect → END: reflect() consolidates recent episodic
+    memories into semantic/procedural insights exactly once per curriculum
+    run (the "curriculum boundary"), never per-session. With
+    settings.reflection_enabled left at its default (False), reflect() is a
+    no-op and this is byte-for-byte the Phase 15 graph.
+
 Run with:  uv run python -m loop.graph
 """
 
@@ -56,6 +63,7 @@ from loop.nodes.interviewers import beh_interviewer, coding_interviewer, sd_inte
 from loop.nodes.panel import grade_aggregator, grade_dispatch, panel_grader
 from loop.nodes.planner import planner
 from loop.nodes.readiness import readiness
+from loop.nodes.reflect import reflect
 from loop.nodes.research import research
 from loop.nodes.supervisor import interview_supervisor
 from loop.observability import get_langfuse_callback
@@ -344,6 +352,7 @@ def build_graph(orchestration_mode: str = "fixed", panel_grading: bool = False) 
     graph.add_node("coach", coach)
     graph.add_node("advance_session", advance_session)
     graph.add_node("readiness", readiness)  # HITL gate 2
+    graph.add_node("reflect", reflect)  # Phase 16b — curriculum-boundary consolidation
 
     # ── plan_approval (HITL gate 1) — hands off to the mode's entry point ───
     # plan_approval has NO static outgoing edge; it always returns Command(goto=...),
@@ -422,7 +431,8 @@ def build_graph(orchestration_mode: str = "fixed", panel_grading: bool = False) 
             path_map={"replan": "replan", "continue": "session_router", "done": "readiness"},
         )
 
-    graph.add_edge("readiness", END)
+    graph.add_edge("readiness", "reflect")
+    graph.add_edge("reflect", END)
 
     return graph
 
@@ -612,9 +622,9 @@ def main() -> None:
     print(f"  Verdict approved:{r1.get('verdict_approved')}")
     print(f"  Weak areas:      {r1.get('weak_areas')}")
 
-    from loop.memory import get_store_instance
+    from loop.memory import get_store_instance, semantic_namespace
 
-    item = get_store_instance().get(("loop", "users"), "kiran")
+    item = get_store_instance().get(semantic_namespace("kiran"), "weak_areas")
     if item:
         print(f"\n  Store after session 1: {item.value}")
 

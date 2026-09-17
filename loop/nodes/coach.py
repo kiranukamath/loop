@@ -3,7 +3,9 @@ Coach node — turns session grades into actionable feedback.
 
 Reads:  state["grades"]
 Writes: state["weak_areas"]  (list of topics to focus on next session)
-        long-term store[user_id]["weak_areas"]  (Phase 4: cross-session memory)
+        long-term store (Phase 4: cross-session memory; Phase 16a: typed
+        namespaces) -- the merged weak_areas fact plus one immutable episodic
+        record for this session.
 
 The weak_areas written to the store are read by the planner at the START of the
 next session, closing the feedback loop: grade → store → next plan adapts.
@@ -45,6 +47,12 @@ def _persist_weak_areas(new_areas: list[str]) -> None:
 
     No-op when called outside a graph context or when no store is wired.
     Merges (not replaces) so areas accumulate across sessions.
+
+    Phase 16a: writes go to the typed semantic/episodic namespaces
+    (loop/memory.py). Reads via get_weak_areas_state() are back-compat --
+    they see the old flat ("loop","users") shape too -- but every write here
+    migrates the record forward into the typed shape, so once a user has been
+    through this path once, the legacy shape is never touched again.
     """
     try:
         from langgraph.config import get_config, get_store
@@ -57,13 +65,19 @@ def _persist_weak_areas(new_areas: list[str]) -> None:
     except RuntimeError:
         return
 
-    existing = store.get(("loop", "users"), user_id)
-    existing_areas = existing.value.get("weak_areas", []) if existing else []
-    session_count = (existing.value.get("session_count", 0) if existing else 0) + 1
+    from loop.memory import get_weak_areas_state, put_episode, put_weak_areas_state
+
+    existing_areas, session_count = get_weak_areas_state(store, user_id)
+    session_count += 1
 
     # Merge: existing first (older, higher priority for ordering) + new
     merged = list(dict.fromkeys(existing_areas + new_areas))
-    store.put(("loop", "users"), user_id, {"weak_areas": merged, "session_count": session_count})
+    put_weak_areas_state(store, user_id, merged, session_count)
+
+    # Episodic: an immutable record of what THIS session's grading turned up,
+    # separate from the running merged list -- reflect() (Phase 16b) reads
+    # these to consolidate insights.
+    put_episode(store, user_id, session_count, new_areas)
 
 
 # ── Node ──────────────────────────────────────────────────────────────────────

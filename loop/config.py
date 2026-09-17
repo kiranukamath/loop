@@ -151,6 +151,29 @@ class Settings(BaseSettings):
     replan_score_threshold: int = 5
     replan_max_times: int = 1
 
+    # ── Advanced memory (Phase 16) ────────────────────────────────────────────
+    # 16c: dimensionality of the vectors loop/memory.py's long-term store
+    # indexes semantic insights with. Must match whatever get_embeddings()
+    # actually returns (Titan v2 defaults to 1024-dim output).
+    embedding_dims: int = 1024
+
+    # 16b: reflect() consolidates recent episodic memories (per-session
+    # weak-area updates) into durable semantic/procedural insights, wired at
+    # the end of a curriculum run (graph.py: readiness -> reflect -> END).
+    # Off by default -- with it off, reflect() is a no-op and weak_areas
+    # keeps working exactly as it did through Phase 4/16a.
+    reflection_enabled: bool = False
+
+    # 16c: top-k semantic insights recalled by embedding similarity
+    # (loop/memory.py's recall_semantic_memories) for the planner prompt,
+    # instead of dumping every stored insight in.
+    memory_recall_k: int = 3
+
+    # 16c: a semantic insight older than this many sessions (by the
+    # session_count it was written at) is treated as stale and excluded from
+    # recall -- a simple, deterministic decay policy, no model call.
+    memory_ttl_sessions: int = 10
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

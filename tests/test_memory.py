@@ -304,29 +304,63 @@ class TestCoachWritesStore:
         return app.invoke(initial_state(), config=cfg)
 
     def test_coach_writes_weak_areas_to_store(self, monkeypatch):
+        from loop.memory import semantic_namespace
+
         store = InMemoryStore()
         self._run_coach_in_graph(monkeypatch, store)
-        item = store.get(("loop", "users"), "u1")
+        item = store.get(semantic_namespace("u1"), "weak_areas")
         assert item is not None
         assert set(_STUB_FEEDBACK.weak_areas_update) <= set(item.value["weak_areas"])
 
     def test_coach_sets_session_count(self, monkeypatch):
+        from loop.memory import semantic_namespace
+
         store = InMemoryStore()
         self._run_coach_in_graph(monkeypatch, store)
-        item = store.get(("loop", "users"), "u1")
+        item = store.get(semantic_namespace("u1"), "weak_areas")
         assert item.value["session_count"] == 1
 
-    def test_coach_merges_with_existing_weak_areas(self, monkeypatch):
+    def test_coach_writes_episodic_record(self, monkeypatch):
+        """Phase 16a: coach also writes an immutable per-session episodic record."""
+        from loop.memory import episodic_namespace
+
         store = InMemoryStore()
-        # Pre-seed the store
-        store.put(("loop", "users"), "u1", {"weak_areas": ["Kafka"], "session_count": 1})
         self._run_coach_in_graph(monkeypatch, store)
-        item = store.get(("loop", "users"), "u1")
+        item = store.get(episodic_namespace("u1"), "session-1")
+        assert item is not None
+        assert item.value["session_number"] == 1
+        assert item.value["new_weak_areas"] == _STUB_FEEDBACK.weak_areas_update
+
+    def test_coach_merges_with_existing_weak_areas(self, monkeypatch):
+        from loop.memory import semantic_namespace
+
+        store = InMemoryStore()
+        # Pre-seed the store (typed shape this time -- see
+        # TestBackwardCompatMigration below for the legacy-shape case)
+        store.put(
+            semantic_namespace("u1"), "weak_areas", {"weak_areas": ["Kafka"], "session_count": 1}
+        )
+        self._run_coach_in_graph(monkeypatch, store)
+        item = store.get(semantic_namespace("u1"), "weak_areas")
         # Should have both old and new areas
         assert "Kafka" in item.value["weak_areas"]
         for area in _STUB_FEEDBACK.weak_areas_update:
             assert area in item.value["weak_areas"]
         assert item.value["session_count"] == 2
+
+    def test_coach_migrates_legacy_flat_shape_forward(self, monkeypatch):
+        """Phase 16a: pre-existing Phase 4 flat-shape data is read (not lost)
+        and the next write lands in the typed semantic namespace."""
+        from loop.memory import semantic_namespace
+
+        store = InMemoryStore()
+        store.put(("loop", "users"), "u1", {"weak_areas": ["Kafka"], "session_count": 1})
+        self._run_coach_in_graph(monkeypatch, store)
+
+        migrated = store.get(semantic_namespace("u1"), "weak_areas")
+        assert migrated is not None
+        assert "Kafka" in migrated.value["weak_areas"]
+        assert migrated.value["session_count"] == 2
 
     def test_coach_no_store_does_not_crash(self, monkeypatch):
         """Coach works fine when compiled without a store."""
@@ -560,3 +594,263 @@ class TestCheckpointerFactory:
         assert snap.values.get("plan") is not None
         assert snap.values.get("weak_areas") == ["binary-search"]
         conn2.close()
+
+
+# ── Phase 16a: typed namespace helpers ────────────────────────────────────────
+
+
+class TestMemoryTypingHelpers:
+    """loop/memory.py's namespace + read/write helpers, unit-level (no graph)."""
+
+    def test_namespaces_are_distinct_and_typed(self):
+        from loop.memory import episodic_namespace, procedural_namespace, semantic_namespace
+
+        assert episodic_namespace("u1") == ("loop", "users", "u1", "episodic")
+        assert semantic_namespace("u1") == ("loop", "users", "u1", "semantic")
+        assert procedural_namespace("u1") == ("loop", "users", "u1", "procedural")
+
+    def test_get_weak_areas_state_reads_typed_shape(self):
+        from loop.memory import get_weak_areas_state, put_weak_areas_state
+
+        store = InMemoryStore()
+        put_weak_areas_state(store, "u1", ["Kafka"], 3)
+        areas, count = get_weak_areas_state(store, "u1")
+        assert areas == ["Kafka"]
+        assert count == 3
+
+    def test_get_weak_areas_state_falls_back_to_legacy_shape(self):
+        """Back-compat: pre-Phase-16 flat data is still readable when no typed
+        entry exists yet."""
+        from loop.memory import get_weak_areas_state
+
+        store = InMemoryStore()
+        store.put(("loop", "users"), "u1", {"weak_areas": ["Kafka"], "session_count": 5})
+        areas, count = get_weak_areas_state(store, "u1")
+        assert areas == ["Kafka"]
+        assert count == 5
+
+    def test_typed_shape_takes_precedence_over_legacy(self):
+        """Once migrated, the typed entry wins even if a stale legacy entry
+        still exists."""
+        from loop.memory import get_weak_areas_state, put_weak_areas_state
+
+        store = InMemoryStore()
+        store.put(("loop", "users"), "u1", {"weak_areas": ["stale"], "session_count": 1})
+        put_weak_areas_state(store, "u1", ["fresh"], 2)
+        areas, count = get_weak_areas_state(store, "u1")
+        assert areas == ["fresh"]
+        assert count == 2
+
+    def test_get_weak_areas_state_missing_user_returns_empty(self):
+        from loop.memory import get_weak_areas_state
+
+        store = InMemoryStore()
+        areas, count = get_weak_areas_state(store, "nobody")
+        assert areas == []
+        assert count == 0
+
+    def test_episode_round_trip(self):
+        from loop.memory import get_recent_episodes, put_episode
+
+        store = InMemoryStore()
+        put_episode(store, "u1", 1, ["sliding-window"])
+        put_episode(store, "u1", 2, ["concurrency"])
+        episodes = get_recent_episodes(store, "u1", session_count=2, window=10)
+        assert [e["session_number"] for e in episodes] == [1, 2]
+        assert episodes[0]["new_weak_areas"] == ["sliding-window"]
+        assert episodes[1]["new_weak_areas"] == ["concurrency"]
+
+    def test_get_recent_episodes_is_bounded_by_window(self):
+        from loop.memory import get_recent_episodes, put_episode
+
+        store = InMemoryStore()
+        for n in range(1, 6):
+            put_episode(store, "u1", n, [f"topic-{n}"])
+        episodes = get_recent_episodes(store, "u1", session_count=5, window=2)
+        assert [e["session_number"] for e in episodes] == [4, 5]
+
+
+# ── Phase 16c: decay/conflict policy ──────────────────────────────────────────
+
+
+class TestConflictResolution:
+    def test_no_existing_value_returns_candidate(self):
+        from loop.memory import resolve_conflict
+
+        candidate = {"text": "x", "confidence": 0.5, "created_session_count": 1}
+        assert resolve_conflict(None, candidate) == candidate
+
+    def test_newer_session_wins(self):
+        from loop.memory import resolve_conflict
+
+        old = {"text": "old fact", "confidence": 0.9, "created_session_count": 1}
+        new = {"text": "new fact", "confidence": 0.2, "created_session_count": 5}
+        assert resolve_conflict(old, new) == new
+
+    def test_older_candidate_loses_even_with_higher_confidence(self):
+        from loop.memory import resolve_conflict
+
+        existing = {"text": "current", "confidence": 0.4, "created_session_count": 5}
+        stale_candidate = {"text": "stale", "confidence": 0.99, "created_session_count": 1}
+        assert resolve_conflict(existing, stale_candidate) == existing
+
+    def test_tie_breaks_on_higher_confidence(self):
+        from loop.memory import resolve_conflict
+
+        existing = {"text": "a", "confidence": 0.3, "created_session_count": 3}
+        candidate = {"text": "b", "confidence": 0.8, "created_session_count": 3}
+        assert resolve_conflict(existing, candidate) == candidate
+
+
+class TestPutSemanticInsight:
+    def test_same_topic_resolves_via_conflict_policy(self):
+        from loop.memory import put_semantic_insight, semantic_namespace
+
+        store = InMemoryStore()
+        put_semantic_insight(
+            store,
+            "u1",
+            topic="pacing",
+            text="rushes system design",
+            confidence=0.5,
+            session_count=1,
+        )
+        put_semantic_insight(
+            store,
+            "u1",
+            topic="pacing",
+            text="now paces system design well",
+            confidence=0.5,
+            session_count=3,
+        )
+        item = store.get(semantic_namespace("u1"), "pacing")
+        assert item.value["text"] == "now paces system design well"
+        assert item.value["created_session_count"] == 3
+
+    def test_different_topics_coexist(self):
+        from loop.memory import put_semantic_insight, semantic_namespace
+
+        store = InMemoryStore()
+        put_semantic_insight(store, "u1", topic="pacing", text="a", confidence=0.5, session_count=1)
+        put_semantic_insight(store, "u1", topic="depth", text="b", confidence=0.5, session_count=1)
+        assert store.get(semantic_namespace("u1"), "pacing").value["text"] == "a"
+        assert store.get(semantic_namespace("u1"), "depth").value["text"] == "b"
+
+
+# ── Phase 16c: semantic recall (embedding similarity) + decay ────────────────
+
+
+def _indexed_store(dims=256):
+    """An InMemoryStore wired for semantic search, using DeterministicFakeEmbedding
+    (offline -- no Bedrock call). Mirrors loop.memory._make_store()'s index
+    config shape, but built directly so these tests don't depend on the
+    process-level singleton."""
+    from langchain_core.embeddings.fake import DeterministicFakeEmbedding
+
+    return InMemoryStore(
+        index={"dims": dims, "embed": DeterministicFakeEmbedding(size=dims), "fields": ["text"]}
+    )
+
+
+class TestSemanticRecall:
+    def test_recall_ranks_exact_text_match_first(self):
+        """DeterministicFakeEmbedding has no real semantic meaning, but the
+        SAME text always embeds to the SAME vector -- querying with a stored
+        insight's exact text must rank it first over an unrelated insight."""
+        from loop.memory import put_semantic_insight, recall_semantic_memories
+
+        store = _indexed_store()
+        put_semantic_insight(
+            store,
+            "u1",
+            topic="a",
+            text="struggles with concurrency edge cases",
+            confidence=0.8,
+            session_count=1,
+        )
+        put_semantic_insight(
+            store,
+            "u1",
+            topic="b",
+            text="completely unrelated fact about STAR format",
+            confidence=0.8,
+            session_count=1,
+        )
+
+        results = recall_semantic_memories(
+            store, "u1", query="struggles with concurrency edge cases", session_count=1, k=1
+        )
+        assert len(results) == 1
+        assert results[0]["text"] == "struggles with concurrency edge cases"
+
+    def test_recall_excludes_non_text_items(self):
+        """weak_areas (no 'text' field) never leaks into semantic recall."""
+        from loop.memory import put_semantic_insight, put_weak_areas_state, recall_semantic_memories
+
+        store = _indexed_store()
+        put_weak_areas_state(store, "u1", ["Kafka"], 1)
+        put_semantic_insight(
+            store, "u1", topic="a", text="an insight", confidence=0.8, session_count=1
+        )
+
+        results = recall_semantic_memories(store, "u1", query="an insight", session_count=1)
+        assert all("text" in r for r in results)
+        assert any(r["text"] == "an insight" for r in results)
+
+    def test_recall_respects_k(self):
+        from loop.memory import put_semantic_insight, recall_semantic_memories
+
+        store = _indexed_store()
+        for i in range(5):
+            put_semantic_insight(
+                store,
+                "u1",
+                topic=f"t{i}",
+                text=f"insight number {i}",
+                confidence=0.5,
+                session_count=1,
+            )
+
+        results = recall_semantic_memories(store, "u1", query="insight", session_count=1, k=2)
+        assert len(results) == 2
+
+    def test_recall_degrades_gracefully_without_index(self):
+        """A plain InMemoryStore() (no index config) still returns items --
+        just not similarity-ranked -- rather than raising."""
+        from loop.memory import put_semantic_insight, recall_semantic_memories
+
+        store = InMemoryStore()
+        put_semantic_insight(
+            store, "u1", topic="a", text="some insight", confidence=0.8, session_count=1
+        )
+        results = recall_semantic_memories(store, "u1", query="some insight", session_count=1)
+        assert results and results[0]["text"] == "some insight"
+
+
+class TestMemoryDecay:
+    def test_stale_insight_excluded_from_recall(self):
+        from loop.memory import put_semantic_insight, recall_semantic_memories
+
+        store = _indexed_store()
+        put_semantic_insight(
+            store, "u1", topic="old", text="an old fact", confidence=0.8, session_count=1
+        )
+
+        # Session count has advanced far past the default TTL (10 sessions).
+        results = recall_semantic_memories(
+            store, "u1", query="an old fact", session_count=20, ttl=10
+        )
+        assert results == []
+
+    def test_fresh_insight_within_ttl_is_recalled(self):
+        from loop.memory import put_semantic_insight, recall_semantic_memories
+
+        store = _indexed_store()
+        put_semantic_insight(
+            store, "u1", topic="recent", text="a recent fact", confidence=0.8, session_count=8
+        )
+
+        results = recall_semantic_memories(
+            store, "u1", query="a recent fact", session_count=10, ttl=10
+        )
+        assert any(r["text"] == "a recent fact" for r in results)

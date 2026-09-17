@@ -13,6 +13,13 @@ when a target company was set) and folds it into the prompt, so the plan can
 be grounded in real company signal — e.g. "focus more on distributed systems
 since this company's interview format emphasises system design."  Absent when
 no company was set; the prompt says so plainly rather than guessing.
+
+Phase 16: _get_stored_weak_areas() reads the typed semantic namespace (with
+back-compat fallback to the old Phase 4 flat shape -- see loop/memory.py).
+_get_semantic_insights() additionally recalls reflect()'s (Phase 16b)
+consolidated insights by embedding similarity (Phase 16c), so the plan can
+be grounded in durable, higher-level facts about the candidate -- not just
+the raw weak_areas list.
 """
 
 from __future__ import annotations
@@ -41,6 +48,9 @@ _HUMAN = """## Job Description
 
 ## Known Weak Areas (from previous sessions — empty on first session)
 {weak_areas}
+
+## Consolidated Insights (from reflection on past sessions — Phase 16)
+{insights}
 
 ## Company Research
 {company_research}
@@ -93,8 +103,40 @@ def _get_stored_weak_areas() -> list[str]:
     except RuntimeError:
         return []
 
-    item = store.get(("loop", "users"), user_id)
-    return item.value.get("weak_areas", []) if item else []
+    from loop.memory import get_weak_areas_state
+
+    areas, _ = get_weak_areas_state(store, user_id)
+    return areas
+
+
+_NO_INSIGHTS_TEXT = "(none yet — reflection hasn't run, or this is a new candidate)"
+
+
+def _get_semantic_insights(query: str) -> list[str]:
+    """Recall reflect()'s (Phase 16b) consolidated semantic insights by
+    embedding similarity (Phase 16c), scoped to this user.
+
+    Returns [] under the same conditions as _get_stored_weak_areas: no graph
+    context, no store wired, or (here) no insights have been written yet --
+    reflection_enabled defaults to False, so this is [] for every run unless
+    reflection has been turned on and has actually run at least once.
+    """
+    try:
+        from langgraph.config import get_config, get_store
+
+        store = get_store()
+        if store is None:
+            return []
+        cfg = get_config()
+        user_id = cfg.get("configurable", {}).get("user_id", "default")
+    except RuntimeError:
+        return []
+
+    from loop.memory import get_weak_areas_state, recall_semantic_memories
+
+    _, session_count = get_weak_areas_state(store, user_id)
+    memories = recall_semantic_memories(store, user_id, query=query, session_count=session_count)
+    return [m["text"] for m in memories]
 
 
 # ── Node ──────────────────────────────────────────────────────────────────────
@@ -134,11 +176,17 @@ def planner(state: dict) -> dict:
     all_weak_areas = list(dict.fromkeys(store_areas + state_areas))
     weak_areas_str = ", ".join(all_weak_areas) if all_weak_areas else "none"
 
+    # Phase 16: recall consolidated insights relevant to this JD/profile,
+    # rather than dumping every stored insight in.
+    insights = _get_semantic_insights(query=f"{state['jd']}\n{state['profile']}")
+    insights_str = "\n".join(f"- {i}" for i in insights) if insights else _NO_INSIGHTS_TEXT
+
     plan: PrepPlan = chain.invoke(
         {
             "jd": state["jd"],
             "profile": state["profile"],
             "weak_areas": weak_areas_str,
+            "insights": insights_str,
             "company_research": _format_company_research(state.get("company_research")),
         },
         config=config,
