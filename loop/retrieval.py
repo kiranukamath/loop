@@ -29,8 +29,12 @@ The module-level indexes are built lazily on first access so that tests can
 monkeypatch get_embeddings/get_reranker BEFORE the index is built, then call
 _build_index() to rebuild with fakes.
 
-v2 seam: swap InMemoryVectorStore -> PGVector in _build_index() only; the
-         retrieve_questions() signature and callers stay unchanged.
+Phase 18b: InMemoryVectorStore -> PGVector, gated on settings.pgvector_conn_string
+(empty = today's InMemoryVectorStore behaviour, byte-for-byte). Only
+_build_index()/_modality_filter() know which backend is live -- the
+retrieve_questions() signature and every caller are unchanged either way.
+A real pgvector run is a *server* activity; tests only exercise the dispatch
+with the PGVector constructor mocked out (no real Postgres in tests/).
 
 Verified against langchain-core==1.4.7:
     InMemoryVectorStore(embedding=<Embeddings>)
@@ -100,12 +104,32 @@ def _build_index() -> None:
         for q in questions
     ]
 
-    store = InMemoryVectorStore(embedding=get_embeddings())
+    store = _make_vector_store()
     store.add_documents(docs)
 
     _vector_store = store
     _documents = docs
     _bm25 = BM25Okapi([_tokenize(d.page_content) for d in docs])
+
+
+def _make_vector_store():
+    """Build the vector store backend (Phase 18b seam).
+
+    settings.pgvector_conn_string set -> PGVector (a real pgvector-backed
+    Postgres table); empty (the default) -> InMemoryVectorStore, exactly the
+    Phase 8/14 behaviour. Both expose the same add_documents()/
+    similarity_search() surface that _dense_rank_ids() below relies on.
+    """
+    if settings.pgvector_conn_string:
+        from langchain_postgres import PGVector
+
+        return PGVector(
+            embeddings=get_embeddings(),
+            collection_name="loop_questions",
+            connection=settings.pgvector_conn_string,
+            use_jsonb=True,
+        )
+    return InMemoryVectorStore(embedding=get_embeddings())
 
 
 def _get_store() -> InMemoryVectorStore:
@@ -124,9 +148,19 @@ def _get_documents() -> list[Document]:
 
 
 def _modality_filter(modality: str | None):
+    """Build the `filter` argument for similarity_search().
+
+    InMemoryVectorStore wants a Callable[[Document], bool]; PGVector (Phase
+    18b) wants a plain metadata-equality dict instead (verified against
+    installed langchain-postgres==0.0.18's PGVector.similarity_search
+    signature). Both stores expose the same `filter=` keyword, so
+    _dense_rank_ids() below never needs to know which backend is live.
+    """
     if modality is None:
         return None
-    return lambda doc: doc.metadata.get("modality") == modality  # noqa: E731
+    if isinstance(_vector_store, InMemoryVectorStore):
+        return lambda doc: doc.metadata.get("modality") == modality  # noqa: E731
+    return {"modality": modality}
 
 
 def _dense_rank_ids(query: str, modality: str | None, pool_size: int) -> list[str]:

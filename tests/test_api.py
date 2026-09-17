@@ -110,8 +110,15 @@ def client(monkeypatch):
 
     monkeypatch.setattr(api_mod, "_graph", fresh_graph)
 
-    # Reset per-session state so tests don't bleed into each other.
-    monkeypatch.setattr(api_mod, "_pending", {})
+    # Phase 18a: pending-resume + budget state now lives in loop/memory.py's
+    # long-term store (so it can be Postgres-backed and survive a restart),
+    # not a process-local dict. Point api.py at a brand-new InMemoryStore per
+    # test so tests stay isolated from each other exactly like the old
+    # `_pending = {}` reset did.
+    from langgraph.store.memory import InMemoryStore
+
+    fresh_store = InMemoryStore()
+    monkeypatch.setattr(api_mod, "get_store_instance", lambda: fresh_store)
 
     from loop.api import app
 
@@ -341,6 +348,101 @@ class TestListSessions:
         tid = client.post("/sessions").json()["thread_id"]
         resp = client.post(f"/sessions/{tid}/resume", json={"action": "teleport"})
         assert resp.status_code == 422
+
+
+# ── Phase 18a: durable session state (pending resume + budget) ───────────────
+#
+# Before Phase 18a, `_pending`/`_budgets` were process-local dicts — lost on
+# restart even when the graph's own checkpoint (SqliteSaver/PostgresSaver)
+# survived. They now live in loop/memory.py's long-term STORE (see
+# loop/api.py's _SESSION_NAMESPACE helpers), so a "restart" that keeps the
+# store (e.g. a real PostgresStore) keeps this too. These tests exercise the
+# helper functions directly against one InMemoryStore instance — the offline
+# stand-in for a durable Postgres-backed store — without needing api.py's
+# module-level dicts at all (there are none left).
+
+
+class TestDurableSessionState:
+    def test_pending_resume_survives_across_separate_lookups(self, monkeypatch):
+        """Simulates a restart: nothing process-local is read back — every
+        helper call re-reads the (shared) store from scratch."""
+        from langgraph.store.memory import InMemoryStore
+
+        import loop.api as api_mod
+
+        shared_store = InMemoryStore()
+        monkeypatch.setattr(api_mod, "get_store_instance", lambda: shared_store)
+
+        api_mod._register_session("thread-durable-1")
+        api_mod._set_pending_resume("thread-durable-1", {"decision": "approve"})
+
+        # A brand-new call to _pop_pending_command reads straight from the
+        # store — nothing cached in a Python dict survives "between" these
+        # two lines except what's in shared_store, exactly modelling a
+        # process restart that keeps the store but not any local state.
+        cmd, was_registered = api_mod._pop_pending_command("thread-durable-1")
+        assert was_registered is True
+        assert cmd is not None
+        assert cmd.resume == {"decision": "approve"}
+
+        # Once popped, it's gone (matches the old dict.pop() semantics).
+        cmd2, _ = api_mod._pop_pending_command("thread-durable-1")
+        assert cmd2 is None
+
+    def test_unknown_thread_is_not_registered(self, monkeypatch):
+        from langgraph.store.memory import InMemoryStore
+
+        import loop.api as api_mod
+
+        monkeypatch.setattr(api_mod, "get_store_instance", lambda: InMemoryStore())
+        cmd, was_registered = api_mod._pop_pending_command("never-created")
+        assert cmd is None
+        assert was_registered is False
+
+    def test_budget_round_trips_through_the_store(self, monkeypatch):
+        from langgraph.store.memory import InMemoryStore
+
+        import loop.api as api_mod
+        from loop.budget import SessionBudget
+
+        shared_store = InMemoryStore()
+        monkeypatch.setattr(api_mod, "get_store_instance", lambda: shared_store)
+
+        budget = SessionBudget()
+        budget.tokens_used = 1234
+        budget.cost_usd = 0.0567
+        api_mod._save_budget("thread-durable-2", budget)
+
+        # Fresh load — simulates reading it back after a restart.
+        reloaded = api_mod._load_budget("thread-durable-2")
+        assert reloaded.tokens_used == 1234
+        assert reloaded.cost_usd == 0.0567
+
+    def test_fresh_thread_loads_a_zeroed_budget(self, monkeypatch):
+        from langgraph.store.memory import InMemoryStore
+
+        import loop.api as api_mod
+
+        monkeypatch.setattr(api_mod, "get_store_instance", lambda: InMemoryStore())
+        budget = api_mod._load_budget("never-seen-thread")
+        assert budget.tokens_used == 0
+        assert budget.cost_usd == 0.0
+
+    def test_answer_question_resume_stores_a_plain_string(self, monkeypatch):
+        """answer_question's resume value is a bare string, not a dict —
+        confirms the store round-trips both shapes correctly."""
+        from langgraph.store.memory import InMemoryStore
+
+        import loop.api as api_mod
+
+        shared_store = InMemoryStore()
+        monkeypatch.setattr(api_mod, "get_store_instance", lambda: shared_store)
+
+        api_mod._register_session("thread-durable-3")
+        api_mod._set_pending_resume("thread-durable-3", "sliding window answer")
+
+        cmd, _ = api_mod._pop_pending_command("thread-durable-3")
+        assert cmd.resume == "sliding window answer"
 
 
 # ── GET /sessions/{thread_id}/history (Phase 11a) ─────────────────────────────

@@ -9,8 +9,6 @@ so nothing here touches the network.
 
 from __future__ import annotations
 
-import pytest
-
 # ── Search seam ────────────────────────────────────────────────────────────
 
 
@@ -73,14 +71,58 @@ class TestWebSearch:
 
         assert web_search("obscure query with no results") == []
 
-    def test_tavily_provider_raises_not_implemented(self, monkeypatch):
-        """Setting a Tavily key routes to the v2 seam, which raises clearly."""
+    def test_tavily_provider_returns_documented_shape(self, monkeypatch):
+        """Phase 18c: a Tavily key routes to the real (stubbed) Tavily client."""
         monkeypatch.setattr("loop.research.search.settings.tavily_api_key", "fake-key")
+
+        class _FakeTavilySearch:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def invoke(self, input_):
+                return {
+                    "query": input_["query"],
+                    "results": [
+                        {
+                            "title": "Stripe engineering blog",
+                            "url": "https://stripe.com/blog",
+                            "content": "We build APIs.",
+                            "score": 0.9,
+                        }
+                    ],
+                }
+
+        monkeypatch.setattr("langchain_tavily.TavilySearch", _FakeTavilySearch)
 
         from loop.research.search import web_search
 
-        with pytest.raises(NotImplementedError, match="Tavily"):
-            web_search("anything")
+        results = web_search("Stripe engineering culture", k=2)
+        assert len(results) == 1
+        assert results[0] == {
+            "title": "Stripe engineering blog",
+            "url": "https://stripe.com/blog",
+            "snippet": "We build APIs.",
+        }
+
+    def test_tavily_no_results_returns_empty_list(self, monkeypatch):
+        """TavilySearch raises ToolException when the API finds nothing --
+        that must degrade to [], same as ddgs's empty-list behaviour."""
+        monkeypatch.setattr("loop.research.search.settings.tavily_api_key", "fake-key")
+
+        from langchain_core.tools import ToolException
+
+        class _FakeTavilySearch:
+            def __init__(self, **kwargs):
+                pass
+
+            def invoke(self, input_):
+                raise ToolException("No results found")
+
+        monkeypatch.setattr("langchain_tavily.TavilySearch", _FakeTavilySearch)
+
+        from loop.research.search import web_search
+
+        assert web_search("obscure query with no results") == []
 
     def test_duckduckgo_is_default_when_no_tavily_key(self, monkeypatch):
         """With no Tavily key configured, the DuckDuckGo path is used."""

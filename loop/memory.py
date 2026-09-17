@@ -115,14 +115,37 @@ def procedural_namespace(user_id: str) -> tuple[str, ...]:
 def _make_checkpointer() -> MemorySaver:
     """Build a checkpointer based on config.
 
-    db_path set → SqliteSaver (durable, file-backed).
-    db_path empty → MemorySaver (in-memory, tests/dev).
+    pg_conn_string set → PostgresSaver  (durable, real Postgres — Phase 18a).
+    db_path set        → SqliteSaver    (durable, file-backed).
+    neither set        → MemorySaver    (in-memory, tests/dev).
 
-    SqliteSaver.setup() creates the schema tables on first call.
-    check_same_thread=False is required because FastAPI runs nodes on
-    the same thread as the event loop — SQLite's default thread check
-    would raise otherwise.
+    SqliteSaver.setup() / PostgresSaver.setup() create the schema tables on
+    first call. check_same_thread=False is required for SQLite because
+    FastAPI runs nodes on the same thread as the event loop — SQLite's
+    default thread check would raise otherwise.
+
+    Phase 18a: PostgresSaver.from_conn_string() is a @contextmanager (it
+    closes the connection on exit) — unsuitable for a process-level
+    singleton that must outlive this function call. Instead we open the
+    psycopg connection directly (autocommit + dict_row, the exact settings
+    from_conn_string uses internally — verified by reading the installed
+    langgraph-checkpoint-postgres==3.1.2 source) and construct PostgresSaver
+    from it, same pattern as the existing sqlite3.connect() path below.
+    A real Postgres server is a *server* activity — tests only exercise this
+    dispatch with psycopg's Connection.connect mocked out.
     """
+    if settings.pg_conn_string:
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg import Connection
+        from psycopg.rows import dict_row
+
+        conn = Connection.connect(
+            settings.pg_conn_string, autocommit=True, prepare_threshold=0, row_factory=dict_row
+        )
+        saver = PostgresSaver(conn)
+        saver.setup()
+        return saver  # type: ignore[return-value]
+
     if settings.db_path:
         import pathlib
 
@@ -154,7 +177,7 @@ class _LazyEmbeddings(Embeddings):
         return get_embeddings().embed_query(text)
 
 
-def _make_store() -> InMemoryStore:
+def _make_store():
     """Build the long-term store, indexed for semantic search (Phase 16c).
 
     fields=["text"] means only items that HAVE a top-level "text" field get
@@ -162,7 +185,33 @@ def _make_store() -> InMemoryStore:
     put_semantic_insight), and nothing else. The "weak_areas" record and
     procedural notes have no "text" field, so they're stored un-embedded,
     same cost as a plain InMemoryStore() put.
+
+    Phase 18a: pg_conn_string set → PostgresStore, built the same way as
+    PostgresSaver above (a direct psycopg connection, not the
+    from_conn_string() context manager, so the store outlives this function).
+    PostgresStore takes the same index config shape as InMemoryStore
+    (verified against installed langgraph-checkpoint-postgres==3.1.2's
+    PostgresIndexConfig) so _LazyEmbeddings works identically either way.
     """
+    if settings.pg_conn_string:
+        from langgraph.store.postgres import PostgresStore
+        from psycopg import Connection
+        from psycopg.rows import dict_row
+
+        conn = Connection.connect(
+            settings.pg_conn_string, autocommit=True, prepare_threshold=0, row_factory=dict_row
+        )
+        store = PostgresStore(
+            conn,
+            index={
+                "dims": settings.embedding_dims,
+                "embed": _LazyEmbeddings(),
+                "fields": ["text"],
+            },
+        )
+        store.setup()
+        return store
+
     return InMemoryStore(
         index={
             "dims": settings.embedding_dims,
@@ -173,18 +222,19 @@ def _make_store() -> InMemoryStore:
 
 
 # Module-level singletons so all graph runs in the same process share state.
-# v2: replace with AsyncPostgresSaver / PostgresStore, reading conn string from config.
 _checkpointer = _make_checkpointer()
-_store: InMemoryStore = _make_store()
+_store = _make_store()
 
 
 def get_checkpointer() -> MemorySaver:
-    """Return the process-level checkpointer (MemorySaver or SqliteSaver)."""
+    """Return the process-level checkpointer (MemorySaver, SqliteSaver, or
+    PostgresSaver)."""
     return _checkpointer
 
 
-def get_store_instance() -> InMemoryStore:
-    """Return the process-level long-term store."""
+def get_store_instance():
+    """Return the process-level long-term store (InMemoryStore or
+    PostgresStore)."""
     return _store
 
 

@@ -174,6 +174,28 @@ class Settings(BaseSettings):
     # recall -- a simple, deterministic decay policy, no model call.
     memory_ttl_sessions: int = 10
 
+    # ── Production infra (Phase 18) ───────────────────────────────────────────
+    # 18a: Postgres connection string for the checkpointer (PostgresSaver) and
+    # long-term store (PostgresStore). Empty (the default) = today's
+    # MemorySaver/SqliteSaver + InMemoryStore behaviour, byte-for-byte
+    # unchanged -- same provider-seam discipline as model_provider/db_path.
+    # A real Postgres server is a *server* activity; tests only exercise the
+    # dispatch logic with the psycopg connection mocked out.
+    pg_conn_string: str = ""
+
+    # 18b: Postgres connection string for the pgvector-backed question index
+    # (loop/retrieval.py). Empty (the default) = today's InMemoryVectorStore
+    # behaviour. 18e's Postgres question-bank DAO (loop/tools.py) reuses this
+    # same connection string -- it's the same database, just a different table.
+    pgvector_conn_string: str = ""
+
+    # 18d: Ollama model/embeddings ids, used only when model_provider="ollama".
+    # base_url defaults to Ollama's standard local port -- override for a
+    # remote Ollama host.
+    ollama_model_id: str = "llama3.1"
+    ollama_embed_model_id: str = "nomic-embed-text"
+    ollama_base_url: str = "http://localhost:11434"
+
     # ── Guardrails provider (Phase 17c) ───────────────────────────────────────
     # "regex" (default) is the Phase 10b heuristic detector in loop/guardrails.py
     # -- free, instant, offline-testable. "llama_guard" is a v2 seam (mirrors

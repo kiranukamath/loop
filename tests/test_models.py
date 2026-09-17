@@ -130,3 +130,44 @@ class TestWithResilienceFallback:
 
         assert result == "primary-result"
         assert fallback_failer.calls == 0
+
+
+# ── Phase 18d: Ollama model seam ──────────────────────────────────────────────
+#
+# A real Ollama server is a *server* activity (needs `ollama serve` running
+# locally). These tests assert only CONSTRUCTION — that get_chat_model()
+# builds a ChatOllama with the right model_id/base_url when
+# model_provider="ollama" — never that it can actually be invoked.
+
+
+class TestOllamaModelSeam:
+    def test_ollama_provider_returns_chat_ollama(self, monkeypatch):
+        from langchain_ollama import ChatOllama
+
+        from loop.config import settings
+        from loop.models import get_chat_model
+
+        monkeypatch.setattr(settings, "model_provider", "ollama")
+        monkeypatch.setattr(settings, "ollama_model_id", "llama3.1")
+        monkeypatch.setattr(settings, "ollama_base_url", "http://localhost:11434")
+
+        model = get_chat_model()
+        assert isinstance(model, ChatOllama)
+        assert model.model == "llama3.1"
+        assert model.base_url == "http://localhost:11434"
+
+    def test_ollama_provider_respects_model_id_override(self, monkeypatch):
+        from loop.config import settings
+        from loop.models import get_chat_model
+
+        monkeypatch.setattr(settings, "model_provider", "ollama")
+        model = get_chat_model("mistral")
+        assert model.model == "mistral"
+
+    def test_unknown_provider_raises(self, monkeypatch):
+        from loop.config import settings
+        from loop.models import get_chat_model
+
+        monkeypatch.setattr(settings, "model_provider", "not-a-real-provider")
+        with pytest.raises(ValueError, match="Unknown model provider"):
+            get_chat_model()

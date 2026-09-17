@@ -30,11 +30,8 @@ def get_chat_model(model_id: str | None = None) -> BaseChatModel:
     if settings.model_provider == "bedrock":
         return _make_bedrock_model(model_id or settings.bedrock_model_id)
 
-    # v2 seam — not implemented yet
     if settings.model_provider == "ollama":
-        raise NotImplementedError(
-            "Ollama provider is a v2 feature.  Set MODEL_PROVIDER=bedrock in your .env for now."
-        )
+        return _make_ollama_model(model_id or settings.ollama_model_id)
 
     raise ValueError(f"Unknown model provider: {settings.model_provider!r}")
 
@@ -52,6 +49,21 @@ def _make_bedrock_model(model_id: str) -> BaseChatModel:
         model_id=model_id,
         region_name=settings.aws_region,
     )
+
+
+def _make_ollama_model(model_id: str) -> BaseChatModel:
+    """Construct a ChatOllama for the given model id (Phase 18d).
+
+    Verified against installed langchain-ollama==1.1.0: ChatOllama's pydantic
+    fields include `model` and `base_url` — no API key, since Ollama is a
+    local (or self-hosted) server. Talking to a real Ollama server is a
+    *server* activity, exactly like a live Bedrock call — tests only assert
+    that this function constructs a ChatOllama with the right model_id/
+    base_url, never that it can actually be invoked.
+    """
+    from langchain_ollama import ChatOllama
+
+    return ChatOllama(model=model_id, base_url=settings.ollama_base_url)
 
 
 def with_resilience(chain: Runnable, fallback_chain: Runnable | None = None) -> Runnable:

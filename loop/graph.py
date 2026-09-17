@@ -76,7 +76,8 @@ _FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
 def intake(state: dict) -> dict:
-    """Load JD and profile text from fixtures into state.
+    """Load JD and profile text into state — from a real upload if provided,
+    else the static fixtures.
 
     Does NOT set state["company"] — company stays None (the initial_state()
     default) unless a caller sets it explicitly before invoking the graph.
@@ -84,13 +85,21 @@ def intake(state: dict) -> dict:
     Phase 9) routing straight to the planner, unaffected by the new research
     node. See main() below for how the demo opts in via fixtures/sample_company.txt.
 
-    Phase 10b: jd/profile are untrusted input (today they're static fixtures,
-    but this is the seam where a real JD upload would land) — redact PII
-    before it ever reaches a prompt, and flag (not block) suspected
-    prompt-injection attempts so the human can see what was caught.
+    Phase 10b: jd/profile are untrusted input — redact PII before it ever
+    reaches a prompt, and flag (not block) suspected prompt-injection
+    attempts so the human can see what was caught.
+
+    Phase 18e: this is the JD-upload seam. A caller (e.g. a future
+    POST /sessions body, or a test) can pre-populate state["jd"]/["profile"]
+    with real uploaded text BEFORE invoking the graph; intake() uses it
+    verbatim instead of the fixture files. Every existing caller leaves
+    these fields at initial_state()'s None default, so the fixture path is
+    unchanged unless a caller deliberately opts in.
     """
-    jd = redact_pii((_FIXTURES / "sample_jd.md").read_text())
-    profile = redact_pii((_FIXTURES / "sample_profile.md").read_text())
+    jd_source = state.get("jd") or (_FIXTURES / "sample_jd.md").read_text()
+    profile_source = state.get("profile") or (_FIXTURES / "sample_profile.md").read_text()
+    jd = redact_pii(jd_source)
+    profile = redact_pii(profile_source)
 
     flagged = []
     if detect_injection(jd):

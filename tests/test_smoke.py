@@ -110,7 +110,10 @@ class TestModelFactory:
         with pytest.raises(ValueError, match="Unknown model provider"):
             get_chat_model()
 
-    def test_ollama_raises_not_implemented(self, monkeypatch):
+    def test_ollama_returns_chat_ollama(self, monkeypatch):
+        """Phase 18d: the Ollama seam is filled in — construction only, no
+        real Ollama server is started or contacted (ChatOllama defaults
+        validate_model_on_init=False)."""
         monkeypatch.setenv("BEDROCK_API_KEY", "test-key")
         monkeypatch.setenv("MODEL_PROVIDER", "ollama")
 
@@ -122,10 +125,12 @@ class TestModelFactory:
 
         importlib.reload(models_mod)
 
+        from langchain_ollama import ChatOllama
+
         from loop.models import get_chat_model
 
-        with pytest.raises(NotImplementedError):
-            get_chat_model()
+        model = get_chat_model()
+        assert isinstance(model, ChatOllama)
 
 
 # ── observability ─────────────────────────────────────────────────────────

@@ -276,3 +276,52 @@ def test_retrieve_questions_no_matches_for_impossible_modality(monkeypatch):
     """An empty filtered pool returns [] without touching BM25/reranker."""
     results = retrieve_questions("anything", modality="not_a_real_modality", k=3)
     assert results == []
+
+
+# ── Phase 18b: pgvector seam ───────────────────────────────────────────────────
+#
+# A real pgvector/Postgres run is a *server* activity. These tests mock the
+# PGVector constructor entirely (no real DB) and assert only that
+# _make_vector_store() DISPATCHES to it when pgvector_conn_string is set --
+# same "verify the seam" discipline as the Postgres checkpointer/store tests
+# in test_memory.py. The fake_embeddings autouse fixture above still resets
+# _vector_store to None after each test, so this can't leak into later tests.
+
+
+def test_make_vector_store_uses_pgvector_when_configured(monkeypatch):
+    captured = {}
+
+    class _FakePGVector:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import langchain_postgres
+
+    monkeypatch.setattr(langchain_postgres, "PGVector", _FakePGVector)
+    monkeypatch.setattr("loop.retrieval.settings.pgvector_conn_string", "postgresql://fake/db")
+
+    store = retrieval_mod._make_vector_store()
+    assert isinstance(store, _FakePGVector)
+    assert captured["connection"] == "postgresql://fake/db"
+    assert captured["collection_name"] == "loop_questions"
+
+
+def test_make_vector_store_defaults_to_in_memory(monkeypatch):
+    from langchain_core.vectorstores import InMemoryVectorStore
+
+    monkeypatch.setattr("loop.retrieval.settings.pgvector_conn_string", "")
+    store = retrieval_mod._make_vector_store()
+    assert isinstance(store, InMemoryVectorStore)
+
+
+def test_modality_filter_uses_dict_shape_for_non_in_memory_store(monkeypatch):
+    """A non-InMemoryVectorStore backend gets a plain metadata-equality dict
+    filter (PGVector's similarity_search shape), not the InMemoryVectorStore
+    callable-predicate shape."""
+
+    class _FakeOtherStore:
+        pass
+
+    monkeypatch.setattr(retrieval_mod, "_vector_store", _FakeOtherStore())
+    assert retrieval_mod._modality_filter("coding") == {"modality": "coding"}
+    assert retrieval_mod._modality_filter(None) is None

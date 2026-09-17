@@ -33,7 +33,7 @@ completes.
 | 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ✅ done & approved (15a, 15b, 15c) | — |
 | 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ✅ done & approved (16a, 16b, 16c) | — |
 | 17 | Eval-in-CI (Track H) | regression gate · agent simulation · red-team | ✅ done & approved (17a, 17b, 17c) | — |
-| 18 | Production infra & real data (Track G) | pgvector · Postgres · Ollama · real search · real data | ⬜ not started (v2) — spec'd | — |
+| 18 | Production infra & real data (Track G) | pgvector · Postgres · Ollama · real search · real data | ✅ done & approved (18a-18e) | — |
 | 19 | Voice / multimodal (Track F) | STT+TTS · diagram grading · code sandbox | ⬜ backlog (v2, optional) | — |
 
 Status legend: ⬜ not started · 🟡 in progress · ✅ done & approved · ⏸️ blocked
@@ -1519,6 +1519,100 @@ as server activities.
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 18a+18b+18c+18d+18e — 2026-09-17
+**Built (all five seams, all OFF by default — every existing test and the live-server
+in-memory/fixture/keyless behaviour are byte-for-byte unchanged unless a new config knob is
+set):**
+
+- **18a — Postgres checkpointer + store.** `loop/config.py` — new `pg_conn_string` (empty =
+  off). `loop/memory.py::_make_checkpointer()`/`_make_store()` now check `pg_conn_string`
+  first: when set, they open a `psycopg.Connection` directly (autocommit + `dict_row` — the
+  exact settings `PostgresSaver.from_conn_string()`/`PostgresStore.from_conn_string()` use
+  internally, verified by reading the installed `langgraph-checkpoint-postgres==3.1.2`
+  source) and construct `PostgresSaver(conn)` / `PostgresStore(conn, index=...)` from it,
+  then call `.setup()`. **Deviation from a literal reading of the plan:** `from_conn_string()`
+  is a `@contextmanager` that closes the connection on exit — unusable for a process-level
+  singleton that must outlive the function call — so the raw-connection constructor path
+  (same shape the existing `SqliteSaver` branch already uses) was used instead, not the
+  documented factory classmethod. `loop/api.py` — the `_pending`/`_budgets` process-local
+  dicts (the caveat explicitly called out in the Phase 7d docstring) are gone entirely,
+  replaced by helper functions (`_register_session`, `_set_pending_resume`,
+  `_pop_pending_command`, `_load_budget`, `_save_budget`) that read/write one record per
+  `thread_id` in `loop/memory.py`'s long-term **store** (`("loop","api_sessions")`
+  namespace) — the same InMemoryStore-by-default/PostgresStore-when-configured seam every
+  other piece of durable state already goes through, rather than inventing a second
+  persistence mechanism. `ResumeRequest` bodies are now translated to a plain
+  JSON-serialisable resume *value* (`_build_resume_value`, renamed from `_build_command`)
+  and wrapped in `Command(resume=...)` only when popped back off the store.
+- **18b — pgvector.** `loop/config.py` — new `pgvector_conn_string`. `loop/retrieval.py`'s
+  `_build_index()` now calls a new `_make_vector_store()` that returns `PGVector` (from
+  `langchain-postgres==0.0.18`, reusing `get_embeddings()`) when configured, else today's
+  `InMemoryVectorStore` — `retrieve_questions()`/`search_questions()` and every caller are
+  untouched. **Real API difference found, not assumed:** `PGVector.similarity_search()`'s
+  `filter=` takes a plain metadata-equality **dict**, not the `Callable[[Document], bool]`
+  predicate `InMemoryVectorStore` accepts (verified via `inspect.signature` on the installed
+  package) — `_modality_filter()` now branches on `isinstance(_vector_store,
+  InMemoryVectorStore)` to build the right shape for whichever backend is live.
+- **18c — Real search (Tavily).** `loop/research/search.py::_tavily_search()` now builds a
+  `langchain_tavily.TavilySearch(max_results=k, tavily_api_key=...)` and normalises its
+  response shape (`{"results": [{"title","url","content",...}]}` — read directly from the
+  installed `langchain-tavily==0.2.18` source, not memorised) to the same
+  `{"title","url","snippet"}` dicts `web_search()` already documents; a `ToolException`
+  (Tavily's own "no results" signal) degrades to `[]`, matching `ddgs`'s empty-list behaviour.
+- **18d — Ollama model + embeddings.** `loop/config.py` — `ollama_model_id`,
+  `ollama_embed_model_id`, `ollama_base_url`. `loop/models.py::get_chat_model()` and
+  `loop/embeddings.py::get_embeddings()` now construct `ChatOllama`/`OllamaEmbeddings`
+  (`langchain-ollama==1.1.0`) when `model_provider="ollama"`, instead of raising. Verified
+  `validate_model_on_init` defaults to `False` on both classes, so construction alone never
+  contacts a real Ollama server — tests assert construction only.
+- **18e — Real data.** `loop/tools.py`'s three fixture loaders
+  (`_load_questions`/`_load_rubrics`/`_load_reference_answers`) each gained a `_from_pg()`
+  counterpart, dispatched on `pgvector_conn_string` (the same database as 18b's pgvector
+  index — "real retrieval" and "real data" share one connection string) via a small
+  `_pg_connect()` helper; every public DAO function (`get_questions_by_modality`,
+  `get_rubric`, `get_reference_answer`, ...) is unchanged. `loop/graph.py::intake()` — the
+  JD-upload seam: `state.get("jd")`/`state.get("profile")` are used verbatim (still through
+  `redact_pii`/`detect_injection`) when a caller pre-populates them before invoking the
+  graph; `initial_state()`'s empty-string defaults mean every existing caller still reads the
+  fixture files, unaffected.
+
+**Tests:** `tests/test_memory.py` (`TestPostgresCheckpointerFactory`,
+`TestPostgresStoreFactory` — psycopg's `Connection.connect` and `PostgresSaver`/
+`PostgresStore.setup()` mocked out, dispatch-only), `tests/test_retrieval.py`
+(`_make_vector_store`/`_modality_filter` dispatch, `PGVector` constructor mocked),
+`tests/test_research.py` (Tavily shape + empty-results tests, `TavilySearch` client mocked),
+`tests/test_models.py`/`tests/test_embeddings.py` (new file — Ollama construction asserted,
+never invoked), `tests/test_tools_pg.py` (new file — a "fixture adapter": a fake
+psycopg cursor whose rows come straight from `fixtures/*.json`, proving the Postgres DAO
+path returns byte-identical shapes to the fixture path), `tests/test_graph.py` (JD-upload
+override + fixture-fallback), `tests/test_api.py` (`TestDurableSessionState` — pending
+resume + budget round-tripped through a shared `InMemoryStore` across separate helper calls,
+modelling "the store survives, nothing process-local does" without needing a real process
+restart; also fixed a real test-isolation bug found along the way — the `client` fixture's
+`get_store_instance` monkeypatch was building a *new* `InMemoryStore()` on every call instead
+of returning one shared instance, which silently broke the resume flow the moment 18a
+removed the old dict). **407 passed** (up from 378 baseline before this phase), 0 lint
+errors (`ruff check` + `ruff format --check`).
+
+**Key decisions / lessons:**
+- **No Postgres/pgvector/Ollama/Tavily service exists in this sandbox** — every new backend
+  path is verified structurally (real installed package APIs, `inspect.signature`/source
+  reads, per CLAUDE.md rule #7) and exercised in tests with the network/DB boundary mocked
+  out (psycopg connections, `PGVector`/`PostgresSaver`/`PostgresStore` constructors,
+  `TavilySearch`/`ChatOllama`/`OllamaEmbeddings` clients). A live run against real
+  Postgres/pgvector/Ollama/Tavily is a genuine *server* activity, exactly like every prior
+  phase's "live Bedrock call" caveat — **not** exercised here, and should be sanity-checked
+  once real infra is available before calling this "production-verified" rather than
+  "seam-complete."
+- **`api.py`'s pending/budget state moves into the existing store, not a new table:** the
+  plan raised "Redis or a DB table" as options; reusing `loop/memory.py`'s already-durable,
+  already-Postgres-seamed store avoids a third persistence mechanism and means 18a's
+  checkpointer swap and this fix share one config knob (`pg_conn_string`) and one mental
+  model.
+- **`from_conn_string()` being a context manager is the one place the plan's literal file/line
+  references didn't match the installed library** — worth flagging explicitly since CLAUDE.md
+  rule #7 exists precisely to catch this kind of drift before it ships.
 
 ### Phase 17a+17b+17c — 2026-09-17
 **Built:** `evals/ci_gate.py` (17a) — the two-tier eval-in-CI gate. Tier 1

@@ -64,6 +64,7 @@ from pydantic import BaseModel
 
 from loop.budget import BudgetCallbackHandler, BudgetExceeded, SessionBudget
 from loop.graph import compile_graph_with_memory
+from loop.memory import get_store_instance
 from loop.state import initial_state
 
 app = FastAPI(title="Loop — Interview Coach API", version="0.1.0")
@@ -79,23 +80,88 @@ def root() -> RedirectResponse:
     return RedirectResponse(url="/static/index.html")
 
 
-# Shared compiled graph — uses memory.py singletons (SqliteSaver + InMemoryStore).
+# Shared compiled graph — uses memory.py singletons (SqliteSaver/PostgresSaver
+# + InMemoryStore/PostgresStore).
 _graph = compile_graph_with_memory()
 
-# ── Per-session pending state ──────────────────────────────────────────────────
-# Keyed by thread_id.
-# Value is one of:
-#   None         → thread exists but has not been started yet (fresh initial_state)
-#   Command(...)  → a resume command ready for the next GET /stream call
+# ── Per-session pending state (Phase 18a) ───────────────────────────────────────
+# Previously two process-local dicts (`_pending: dict[str, Command | None]` and
+# `_budgets: dict[str, SessionBudget]`) — lost on restart even when the graph's
+# own checkpoint was durable (SqliteSaver/PostgresSaver). Both now live in
+# loop/memory.py's long-term STORE instead: the same InMemoryStore-by-default /
+# PostgresStore-when-`pg_conn_string`-is-set seam every other piece of durable
+# state (weak_areas, episodic memory) already goes through. Set PG_CONN_STRING
+# to make resume genuinely survive a process restart; leave it unset and this
+# is exactly as durable (or not) as the Phase 16 store always was.
 #
-# This is process-local memory (not persisted).  If the server restarts mid-session,
-# the SQLite checkpoint survives but the pending-command dict is lost.  v2 fix:
-# store pending commands in Redis or a DB table.
-_pending: dict[str, Command | None] = {}
+# Namespace shape: ("loop", "api_sessions") / key=thread_id / value={
+#   "resume": None | str | dict,   # None = registered but not yet resumed
+#   "registered": True,            # distinguishes "fresh start" from "unknown thread"
+#   "tokens_used": int, "cost_usd": float,
+# }
+_SESSION_NAMESPACE = ("loop", "api_sessions")
 
-# Phase 10c — per-session token/cost accountant, keyed by thread_id.
-# Same lifecycle caveat as _pending: process-local, lost on restart.
-_budgets: dict[str, SessionBudget] = {}
+
+def _get_session_record(thread_id: str) -> dict | None:
+    item = get_store_instance().get(_SESSION_NAMESPACE, thread_id)
+    return item.value if item else None
+
+
+def _put_session_record(thread_id: str, record: dict) -> None:
+    get_store_instance().put(_SESSION_NAMESPACE, thread_id, record)
+
+
+def _register_session(thread_id: str) -> None:
+    """Mark a thread_id as known but not yet run (fresh initial_state)."""
+    _put_session_record(
+        thread_id, {"resume": None, "registered": True, "tokens_used": 0, "cost_usd": 0.0}
+    )
+
+
+def _set_pending_resume(thread_id: str, resume_value) -> None:
+    """Store the human's resume payload for the next GET /stream call."""
+    record = _get_session_record(thread_id) or {
+        "resume": None,
+        "registered": True,
+        "tokens_used": 0,
+        "cost_usd": 0.0,
+    }
+    record["resume"] = resume_value
+    _put_session_record(thread_id, record)
+
+
+def _pop_pending_command(thread_id: str) -> tuple[Command | None, bool]:
+    """Return (Command or None, was_registered) and clear the resume slot.
+
+    was_registered=False means this thread_id was never created via
+    POST /sessions (or its record was lost) — the caller falls back to a
+    fresh initial_state(), same as the original dict-based behaviour.
+    """
+    record = _get_session_record(thread_id)
+    if record is None:
+        return None, False
+    resume_value = record.get("resume")
+    if resume_value is not None:
+        record["resume"] = None
+        _put_session_record(thread_id, record)
+        return Command(resume=resume_value), True
+    return None, True
+
+
+def _load_budget(thread_id: str) -> SessionBudget:
+    record = _get_session_record(thread_id)
+    budget = SessionBudget()
+    if record:
+        budget.tokens_used = record.get("tokens_used", 0)
+        budget.cost_usd = record.get("cost_usd", 0.0)
+    return budget
+
+
+def _save_budget(thread_id: str, budget: SessionBudget) -> None:
+    record = _get_session_record(thread_id) or {"resume": None, "registered": True}
+    record["tokens_used"] = budget.tokens_used
+    record["cost_usd"] = budget.cost_usd
+    _put_session_record(thread_id, record)
 
 
 # ── Request / response models ──────────────────────────────────────────────────
@@ -125,25 +191,31 @@ class ResumeResponse(BaseModel):
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _build_command(body: ResumeRequest) -> Command:
-    """Translate a ResumeRequest body into a LangGraph Command(resume=...)."""
+def _build_resume_value(body: ResumeRequest) -> str | dict:
+    """Translate a ResumeRequest body into the raw value for Command(resume=...).
+
+    Phase 18a: returns the plain (JSON-serialisable) payload rather than a
+    Command itself, so callers can persist it to the durable session store
+    (loop/memory.py) and reconstruct Command(resume=...) later, right before
+    it's actually fed to the graph.
+    """
     if body.action == "approve_plan":
         payload: dict = {"decision": body.decision or "approve"}
         if body.decision == "edit" and body.updated_plan:
             payload["updated_plan"] = body.updated_plan
-        return Command(resume=payload)
+        return payload
 
     if body.action == "answer_question":
         if not body.answer:
             raise HTTPException(status_code=422, detail="answer is required for answer_question")
-        return Command(resume=body.answer)
+        return body.answer
 
     if body.action == "approve_verdict":
         payload = {"decision": body.decision or "approve"}
         if body.decision == "override":
             payload["verdict"] = body.verdict or "not_ready"
             payload["reason"] = body.reason or ""
-        return Command(resume=payload)
+        return payload
 
     raise HTTPException(status_code=422, detail=f"Unknown action: {body.action!r}")
 
@@ -213,7 +285,7 @@ def create_session(user_id: str = "default") -> StartResponse:
     record before the worker picks it up.
     """
     thread_id = str(uuid.uuid4())
-    _pending[thread_id] = None  # None = fresh start, not yet running
+    _register_session(thread_id)  # registered, not yet run
     return StartResponse(thread_id=thread_id, user_id=user_id)
 
 
@@ -224,10 +296,9 @@ def resume_session(thread_id: str, body: ResumeRequest) -> ResumeResponse:
     The browser calls this after seeing an 'interrupt' SSE event, then
     immediately re-opens the SSE stream to continue the graph run.
     """
-    if thread_id not in _pending and thread_id not in _pending:
-        # Thread_id unknown — but we allow it anyway; SQLite may have the checkpoint.
-        pass
-    _pending[thread_id] = _build_command(body)
+    # Thread_id unknown to the session store — allow it anyway; the graph's
+    # own checkpointer (SQLite/Postgres) may still have the checkpoint.
+    _set_pending_resume(thread_id, _build_resume_value(body))
     return ResumeResponse(status="queued")
 
 
@@ -246,8 +317,10 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
     def generate() -> Iterator[str]:
         # Phase 10c: one SessionBudget per thread_id, reused across every
         # segment of the same session so tokens accumulate for the whole
-        # interview, not just one SSE stream call.
-        budget = _budgets.setdefault(thread_id, SessionBudget())
+        # interview, not just one SSE stream call. Phase 18a: loaded from
+        # (and saved back to) the durable session store instead of a
+        # process-local dict.
+        budget = _load_budget(thread_id)
         budget_cb = BudgetCallbackHandler(budget)
 
         config = {
@@ -256,13 +329,10 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
         }
 
         # Determine what to feed to graph.stream()
-        cmd = _pending.pop(thread_id, None)
-        if cmd is None and thread_id not in _pending:
-            # cmd was None → fresh start; or thread_id was never registered → still fresh
-            stream_input = initial_state()
-        else:
-            # cmd is a Command — resume from checkpoint
-            stream_input = cmd
+        cmd, _was_registered = _pop_pending_command(thread_id)
+        # cmd is None whether this is a fresh start (registered, no resume queued
+        # yet) or thread_id was never registered at all — either way, start fresh.
+        stream_input = cmd if cmd is not None else initial_state()
 
         try:
             # stream_mode="updates" → yields {node_name: state_delta} after every node.
@@ -271,6 +341,7 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
                 for node, updates in chunk.items():
                     if node == "__interrupt__":
                         # updates is a tuple of Interrupt objects
+                        _save_budget(thread_id, budget)
                         for ipt in updates:
                             yield _sse({"type": "interrupt", **ipt.value})
                         return  # close stream after interrupt
@@ -286,10 +357,12 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
                     payload.update(_safe_payload(updates or {}))
                     payload["tokens_used"] = budget.tokens_used
                     payload["cost_usd"] = round(budget.cost_usd, 6)
+                    _save_budget(thread_id, budget)
                     yield _sse(payload)
         except BudgetExceeded as exc:
             # Stop the session gracefully — the browser sees a clear message
             # instead of a raw 500 / stack trace.
+            _save_budget(thread_id, budget)
             yield _sse(
                 {
                     "type": "error",
@@ -302,6 +375,7 @@ def stream_session(thread_id: str, user_id: str = "default") -> StreamingRespons
             return
 
         # Graph reached END without an interrupt
+        _save_budget(thread_id, budget)
         yield _sse(
             {
                 "type": "done",

@@ -28,11 +28,8 @@ def get_embeddings() -> Embeddings:
     if settings.model_provider == "bedrock":
         return _make_bedrock_embeddings()
 
-    # v2 seam — not implemented yet
     if settings.model_provider == "ollama":
-        raise NotImplementedError(
-            "Ollama embeddings is a v2 feature.  Set MODEL_PROVIDER=bedrock for now."
-        )
+        return _make_ollama_embeddings()
 
     raise ValueError(f"Unknown model provider: {settings.model_provider!r}")
 
@@ -50,3 +47,17 @@ def _make_bedrock_embeddings() -> Embeddings:
         model_id=settings.bedrock_embed_model_id,
         region_name=settings.aws_region,
     )
+
+
+def _make_ollama_embeddings() -> Embeddings:
+    """Construct an OllamaEmbeddings client (Phase 18d).
+
+    Verified against installed langchain-ollama==1.1.0: OllamaEmbeddings'
+    pydantic fields include `model` and `base_url` — same local-server story
+    as _make_ollama_model() in loop/models.py. Tests only assert construction
+    (right model_id/base_url), never a real call against a running Ollama
+    server.
+    """
+    from langchain_ollama import OllamaEmbeddings
+
+    return OllamaEmbeddings(model=settings.ollama_embed_model_id, base_url=settings.ollama_base_url)

@@ -75,6 +75,29 @@ class TestIntakeNode:
         fixture = (pathlib.Path(__file__).parent.parent / "fixtures" / "sample_jd.md").read_text()
         assert result["jd"] == fixture
 
+    def test_pre_supplied_jd_overrides_fixture(self):
+        """Phase 18e: a caller-provided jd (a real upload) wins over the fixture."""
+        from loop.graph import intake
+
+        result = intake({"jd": "Uploaded JD: Staff Platform Engineer.", "profile": ""})
+        assert result["jd"] == "Uploaded JD: Staff Platform Engineer."
+
+    def test_pre_supplied_profile_overrides_fixture(self):
+        from loop.graph import intake
+
+        result = intake({"jd": "", "profile": "Uploaded profile: 10 years Go."})
+        assert result["profile"] == "Uploaded profile: 10 years Go."
+
+    def test_no_upload_falls_back_to_fixtures(self):
+        """Empty/missing jd+profile in state (initial_state()'s default) reads
+        the fixture files exactly as before Phase 18e."""
+        from loop.graph import intake
+
+        result = intake({})
+        jd_path = pathlib.Path(__file__).parent.parent / "fixtures" / "sample_jd.md"
+        fixture_jd = jd_path.read_text()
+        assert result["jd"] == fixture_jd
+
 
 class TestStateShape:
     def test_all_keys_present(self):

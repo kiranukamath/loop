@@ -56,13 +56,33 @@ def _duckduckgo_search(query: str, k: int) -> list[dict]:
 
 
 def _tavily_search(query: str, k: int) -> list[dict]:
-    """Tavily-backed search — v2 seam, not implemented yet.
+    """Tavily-backed search (Phase 18c).
 
-    Deliberately raises, mirroring the Ollama seam in loop/models.py: the
-    branch exists so switching providers later is a one-file change, but
-    building it out is out of scope for v1.
+    Verified against installed langchain-tavily==0.2.18: TavilySearch is a
+    LangChain tool whose `.invoke({"query": ...})` returns a dict shaped
+    {"query": str, "results": [{"title", "url", "content", ...}, ...]} — NOT
+    the raw Tavily client's own response shape. We normalise "content" to
+    "snippet" here so callers never need to know which provider answered.
+
+    A real Tavily call is a *server* activity (needs TAVILY_API_KEY + network),
+    exactly like the ddgs path — tests stub the TavilySearch client entirely.
     """
-    raise NotImplementedError(
-        "Tavily search is a v2 feature. Unset TAVILY_API_KEY to use the "
-        "keyless DuckDuckGo provider for now."
-    )
+    from langchain_core.tools import ToolException
+    from langchain_tavily import TavilySearch
+
+    client = TavilySearch(max_results=k, tavily_api_key=settings.tavily_api_key)
+    try:
+        response = client.invoke({"query": query})
+    except ToolException:
+        # TavilySearch raises when the API itself returns zero results —
+        # treat that the same as ddgs returning an empty list.
+        return []
+    raw_results = response.get("results", []) if isinstance(response, dict) else response
+    return [
+        {
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("content", ""),
+        }
+        for r in raw_results
+    ]

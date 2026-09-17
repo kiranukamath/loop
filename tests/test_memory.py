@@ -596,6 +596,70 @@ class TestCheckpointerFactory:
         conn2.close()
 
 
+# ── Phase 18a: Postgres checkpointer + store seam ─────────────────────────────
+#
+# A real Postgres server is a *server* activity — these tests mock psycopg's
+# Connection.connect (so nothing touches a network socket) and PostgresSaver/
+# PostgresStore's own .setup() (which would otherwise try to run real DDL over
+# that mocked connection), then assert only that _make_checkpointer()/
+# _make_store() DISPATCH to the Postgres classes when pg_conn_string is set —
+# exactly the same "verify the seam picks the right backend" discipline as
+# TestCheckpointerFactory above.
+
+
+class TestPostgresCheckpointerFactory:
+    def test_pg_conn_string_returns_postgres_saver(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        monkeypatch.setattr("loop.memory.settings.pg_conn_string", "postgresql://fake/db")
+        monkeypatch.setattr("psycopg.Connection.connect", lambda *a, **k: MagicMock())
+        monkeypatch.setattr(PostgresSaver, "setup", lambda self: None)
+
+        from loop.memory import _make_checkpointer
+
+        cp = _make_checkpointer()
+        assert isinstance(cp, PostgresSaver)
+
+    def test_pg_conn_string_takes_precedence_over_db_path(self, monkeypatch):
+        """pg_conn_string wins over db_path if both happen to be set."""
+        from unittest.mock import MagicMock
+
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        monkeypatch.setattr("loop.memory.settings.pg_conn_string", "postgresql://fake/db")
+        monkeypatch.setattr("loop.memory.settings.db_path", "somewhere.sqlite")
+        monkeypatch.setattr("psycopg.Connection.connect", lambda *a, **k: MagicMock())
+        monkeypatch.setattr(PostgresSaver, "setup", lambda self: None)
+
+        from loop.memory import _make_checkpointer
+
+        assert isinstance(_make_checkpointer(), PostgresSaver)
+
+
+class TestPostgresStoreFactory:
+    def test_pg_conn_string_returns_postgres_store(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from langgraph.store.postgres import PostgresStore
+
+        monkeypatch.setattr("loop.memory.settings.pg_conn_string", "postgresql://fake/db")
+        monkeypatch.setattr("psycopg.Connection.connect", lambda *a, **k: MagicMock())
+        monkeypatch.setattr(PostgresStore, "setup", lambda self: None)
+
+        from loop.memory import _make_store
+
+        assert isinstance(_make_store(), PostgresStore)
+
+    def test_no_pg_conn_string_returns_in_memory_store(self, monkeypatch):
+        monkeypatch.setattr("loop.memory.settings.pg_conn_string", "")
+
+        from loop.memory import _make_store
+
+        assert isinstance(_make_store(), InMemoryStore)
+
+
 # ── Phase 16a: typed namespace helpers ────────────────────────────────────────
 
 
