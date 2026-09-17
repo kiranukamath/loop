@@ -120,7 +120,16 @@ def _get_semantic_insights(query: str) -> list[str]:
     context, no store wired, or (here) no insights have been written yet --
     reflection_enabled defaults to False, so this is [] for every run unless
     reflection has been turned on and has actually run at least once.
+
+    Guarded on settings.reflection_enabled: recall_semantic_memories() embeds
+    the query via the live embeddings model on every call (LangGraph's
+    InMemoryStore.search() embeds the query before it can even check whether
+    the namespace is empty), so without this check every planner() run would
+    hard-depend on embeddings credentials even when reflection has never run
+    and there's nothing to recall.
     """
+    if not settings.reflection_enabled:
+        return []
     try:
         from langgraph.config import get_config, get_store
 
