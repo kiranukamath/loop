@@ -135,6 +135,22 @@ class Settings(BaseSettings):
     crag_min_relevance: float = 0.5
     crag_max_retries: int = 2
 
+    # ── Self-improvement loops (Phase 15) ───────────────────────────────────────
+    # 15a: a second LLM pass that critiques (and can revise) the grader's own
+    # output before it's committed to state — a Reflexion-style generate→
+    # critique→revise loop. Off by default: today's single-pass grading is
+    # byte-for-byte unchanged unless explicitly opted in.
+    reflexion_enabled: bool = False
+
+    # 15b: bounded replanning. After a session's grade comes back, if it
+    # diverges from the plan's assumptions (score below replan_score_threshold),
+    # re-invoke planner() on the remaining sessions only. replan_max_times
+    # bounds the number of times this can happen in one run — without a bound,
+    # a candidate who keeps scoring low would trigger a replan forever.
+    replan_enabled: bool = False
+    replan_score_threshold: int = 5
+    replan_max_times: int = 1
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

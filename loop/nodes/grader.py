@@ -12,9 +12,21 @@ answer for the question and injects it into the prompt, so the model grades
 against known-good evidence instead of purely its own judgment of correctness.
 The reference is optional grounding, not a hard requirement: a question
 without a reference_answers.json entry still grades normally (rubric alone).
+
+Phase 15a: an optional Reflexion self-critique pass — a second LLM call that
+reviews the first grade against the rubric/reference and can revise it before
+it's committed to state. Gated by settings.reflexion_enabled (default off).
+
+Phase 15c: the grading prompt's system message is loaded from
+fixtures/optimized_grader_prompt.txt when that artifact exists (written by the
+offline `evals/optimize_grader.py` DSPy run), falling back to the hand-written
+_SYSTEM prompt below otherwise. grader.py never imports dspy — it only reads
+the plain-text artifact the optimizer produces.
 """
 
 from __future__ import annotations
+
+import pathlib
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -50,11 +62,123 @@ Rubric (max score: {max_score}):
 
 Grade this answer."""
 
-_PROMPT = ChatPromptTemplate.from_messages([("system", _SYSTEM), ("human", _HUMAN)])
-
 _NO_REFERENCE_TEXT = (
     "(no reference answer available for this question — grade against the rubric alone)"
 )
+
+# ── Phase 15c: optimized-prompt artifact loading ───────────────────────────────
+
+_OPTIMIZED_PROMPT_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent.parent
+    / "fixtures"
+    / "optimized_grader_prompt.txt"
+)
+
+
+def _load_system_prompt() -> str:
+    """Return the grading system prompt: the DSPy-optimized artifact if it
+    exists and is non-empty, otherwise the hand-written _SYSTEM above.
+
+    This is the offline-optimization vs. runtime-serving split: evals/
+    optimize_grader.py (a dev script, run manually, never in tests) is the
+    only thing that writes _OPTIMIZED_PROMPT_PATH. The runtime here just
+    reads whatever's on disk — same shape as loading a trained model's
+    weights instead of retraining on every request.
+    """
+    if _OPTIMIZED_PROMPT_PATH.exists():
+        text = _OPTIMIZED_PROMPT_PATH.read_text().strip()
+        if text:
+            return text
+    return _SYSTEM
+
+
+def _build_grading_prompt() -> ChatPromptTemplate:
+    return ChatPromptTemplate.from_messages([("system", _load_system_prompt()), ("human", _HUMAN)])
+
+
+# ── Phase 15a: Reflexion self-critique ─────────────────────────────────────────
+
+_CRITIQUE_SYSTEM = """\
+You are auditing another interviewer's grade for scoring errors.
+
+You receive the question, the reference answer, the candidate's answer, the
+rubric, and the grade already assigned. Check for: criterion scores that
+don't respect their rubric weight, an overall score that doesn't equal the
+sum of the criterion scores, feedback that contradicts the score (e.g.
+"strengths" outweighing "improvements" but a low score, or vice versa), or an
+obviously miscounted score.
+
+If the grade holds up, return it completely unchanged.
+If you find a genuine error, return a corrected grade — do not change a grade
+you merely would have written differently.
+"""
+
+_CRITIQUE_HUMAN = """\
+Question: {question_prompt}
+
+Reference answer:
+{reference_answer}
+
+Candidate's answer:
+{answer_text}
+
+Rubric (max score: {max_score}):
+{rubric_criteria}
+
+Original grade:
+- score: {original_score}
+- criterion_scores: {original_criterion_scores}
+- strengths: {original_strengths}
+- improvements: {original_improvements}
+- overall_feedback: {original_feedback}
+
+Critique this grade. Return it unchanged if correct, or a revised grade if not."""
+
+_CRITIQUE_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", _CRITIQUE_SYSTEM), ("human", _CRITIQUE_HUMAN)]
+)
+
+
+def _self_critique(
+    grade: Grade,
+    rubric: dict,
+    reference: str,
+    answer_text: str,
+    question_prompt: str,
+) -> Grade:
+    """Second LLM pass: critique `grade` against the rubric/reference and
+    return either the same grade (if it holds up) or a revised one.
+
+    Pure model call — offline-testable by stubbing get_chat_model() exactly
+    like the primary grading call. Only invoked when settings.reflexion_enabled
+    is True (see grader() below); disabled by default so today's single-pass
+    behavior is unchanged.
+    """
+    criteria_text = "\n".join(
+        f"- {c['name']} (weight {c['weight']}): {c['description']}" for c in rubric["criteria"]
+    )
+
+    model = get_chat_model()
+    chain = with_resilience(_CRITIQUE_PROMPT | model.with_structured_output(Grade))
+
+    cb = get_langfuse_callback()
+    config = {"callbacks": [cb]} if cb else {}
+
+    return chain.invoke(
+        {
+            "question_prompt": question_prompt,
+            "reference_answer": reference,
+            "answer_text": answer_text,
+            "max_score": rubric["max_score"],
+            "rubric_criteria": criteria_text,
+            "original_score": grade.score,
+            "original_criterion_scores": grade.criterion_scores,
+            "original_strengths": grade.strengths,
+            "original_improvements": grade.improvements,
+            "original_feedback": grade.overall_feedback,
+        },
+        config=config,
+    )
 
 
 def grader(state: dict) -> dict:
@@ -83,16 +207,17 @@ def grader(state: dict) -> dict:
     # back to a clear placeholder rather than failing when a question has none.
     reference_answer = get_reference_answer(question_id) or _NO_REFERENCE_TEXT
 
+    prompt = _build_grading_prompt()
     model = get_chat_model()
     structured_model = model.with_structured_output(Grade)
-    chain = _PROMPT | structured_model
+    chain = prompt | structured_model
 
     # Phase 10a: retry the primary model; fall back to a secondary model (if
     # configured) after retries are exhausted.
     fallback_chain = None
     if settings.fallback_model_id:
         fallback_model = get_chat_model(settings.fallback_model_id)
-        fallback_chain = _PROMPT | fallback_model.with_structured_output(Grade)
+        fallback_chain = prompt | fallback_model.with_structured_output(Grade)
     chain = with_resilience(chain, fallback_chain)
 
     cb = get_langfuse_callback()
@@ -108,6 +233,17 @@ def grader(state: dict) -> dict:
         },
         config=config,
     )
+
+    # Phase 15a: optional second pass that can catch and fix a scoring error
+    # in the grade above. Off by default -- today's single-pass behavior.
+    if settings.reflexion_enabled:
+        grade = _self_critique(
+            grade,
+            rubric,
+            reference_answer,
+            answer["text"],
+            question["prompt"] if question else "",
+        )
 
     # Return only the new grade — the _append_list reducer on state["grades"]
     # handles accumulation across sessions. Returning the full list here would

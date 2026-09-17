@@ -30,7 +30,7 @@ completes.
 | 12 | MCP & interoperability | interop / Model Context Protocol | ✅ done & approved (12a, 12b) | — |
 | 13 | Multi-agent orchestration | supervisor · parallel (Send) · handoffs | ✅ done & approved (13a, 13b, 13c) | — |
 | 14 | Advanced RAG (Track C) | reranking · CRAG · query rewriting | ✅ done & approved (14a, 14b, 14c) | — |
-| 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ⬜ not started (v2) — spec'd | — |
+| 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ✅ done & approved (15a, 15b, 15c) | — |
 | 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ⬜ not started (v2) — spec'd | — |
 | 17 | Eval-in-CI (Track H) | regression gate · agent simulation · red-team | ⬜ not started (v2) — spec'd | — |
 | 18 | Production infra & real data (Track G) | pgvector · Postgres · Ollama · real search · real data | ⬜ not started (v2) — spec'd | — |
@@ -1519,6 +1519,64 @@ as server activities.
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 15a+15b+15c — 2026-09-17
+**Built:** `loop/nodes/grader.py` — `_self_critique(grade, rubric, reference, answer_text,
+question_prompt) -> Grade` (15a): a second `get_chat_model()` pass, structured-output on the
+same `Grade` schema, given the original grade plus rubric/reference/answer and asked to
+return it unchanged or revised; `grader()` calls it only when `settings.reflexion_enabled`
+is `True` (default `False` — today's single-pass path is byte-for-byte unchanged). Also
+`_load_system_prompt()`/`_build_grading_prompt()` (15c): read
+`fixtures/optimized_grader_prompt.txt` if present and non-empty, else the hand-written
+`_SYSTEM` — `grader()` now builds its prompt through this each call. `loop/graph.py` (15b) —
+`_grade_divergence(state)` (last-appended grade's score below `replan_score_threshold`),
+`replan(state)` (re-invokes `planner()`, splices its fresh sessions in from `session_index`
+onward, renumbers them, caps at however many slots were left so `total_sessions` never
+grows, increments `replan_count`), and `_route_after_advance(state)` — the new edge function
+after `advance_session` in `orchestration_mode="fixed"` (returns `"replan"`/`"continue"`/
+`"done"`; supervisor mode is untouched, replanning isn't wired for it). `loop/config.py` —
+`reflexion_enabled`, `replan_enabled`, `replan_score_threshold` (default 5),
+`replan_max_times` (default 1), all off/bounded by default. `loop/state.py` —
+`replan_count` field (plain overwrite, defaults to 0). `evals/optimize_grader.py` (new,
+dev-only) — a DSPy `Signature`/`Predict` module graded against
+`fixtures/grader_labels.json` via `MIPROv2`, with `evals.run_grader_eval.score_agreement`
+wrapped (not duplicated) as the DSPy metric; writes the winning instruction text to
+`fixtures/optimized_grader_prompt.txt`. `fixtures/optimized_grader_prompt.txt` (new) — a
+hand-written "already optimized" prompt (independent-per-criterion scoring, explicit
+partial-credit guidance, a sum-check reminder) checked in as the realistic artifact so
+`grader()`'s load path has something real to load; a live DSPy run can overwrite it later.
+`pyproject.toml` — `dspy>=3.3.1` (installs cleanly; `dspy.LM(model="bedrock/<model_id>", ...)`
+via litellm, no separate Bedrock adapter class needed). `tests/test_reflexion.py`,
+`tests/test_replan.py`, `tests/test_prompt_optimization.py` (new) — 322/322 total, 0 lint
+errors.
+
+**Key decisions / lessons:**
+- **Planner self-critique left unimplemented (spec marked it optional):** PLAN.md says
+  "optional for `planner()`" — grader.py already demonstrates the generate→critique→revise
+  pattern end-to-end and offline-tested; adding a second copy in planner.py for the same
+  lesson would be duplication without new teaching value, so it was skipped per CLAUDE.md's
+  "clarity over cleverness, no premature abstraction."
+- **Divergence check is a single deterministic signal, on purpose:** `_grade_divergence`
+  looks only at the most recently appended grade (the session `advance_session` just closed
+  out) vs. `replan_score_threshold`. A production system might average several signals; the
+  spec asked for "a simple deterministic divergence check," and a single, inspectable
+  threshold is easier to teach and to unit-test than a composite score.
+- **`replan()` reuses `planner()` rather than a bespoke prompt:** the spec explicitly says
+  "re-invoke `planner()` on the remaining sessions" — `planner()` already reads the latest
+  `weak_areas`, so a fresh call naturally reflects what just went wrong. `replan()`'s own job
+  is purely the splice/renumber/cap around that call, which is also why it's easy to unit-test
+  without stubbing a new prompt.
+- **The optimized-prompt artifact is loaded on every `grader()` call, not cached at import
+  time:** a small `pathlib.Path.read_text()` per call is cheap and keeps
+  `_load_system_prompt()` independently testable (monkeypatch the path constant, no module
+  reload needed) — matches how `tests/test_prompt_optimization.py` verifies both the
+  present- and absent-artifact branches without ever importing `dspy`.
+- **`dspy` installed cleanly via `uv add dspy`** (package name is `dspy`, not `dspy-ai`, as
+  of `dspy==3.3.1` — verified per CLAUDE.md rule #7 rather than assumed) and its Bedrock
+  path goes through `litellm`'s `bedrock/<model_id>` model-string convention; the optimizer
+  script imports `dspy` only inside functions (never at module top level, and never inside
+  `loop/nodes/grader.py`), so nothing in the runtime or test suite requires it to be
+  importable at collection time beyond the dependency simply being installed.
 
 ### Phase 14a+14b+14c — 2026-09-17
 **Built:** `loop/reranker.py` (new) — `get_reranker()` factory mirroring `embeddings.py`:

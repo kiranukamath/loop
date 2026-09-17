@@ -119,6 +119,12 @@ class LoopState(dict):
     # Langfuse traces play for individual model calls.
     supervisor_decisions: Annotated[Optional[list[dict]], _append_list]
 
+    # ── Phase 15b (bounded replanning) ───────────────────────────────────────
+    # Number of times replan() has run this session. A plain overwrite (not a
+    # reducer) — replan() always writes the new total, same pattern as
+    # session_index.  Bounds settings.replan_max_times in _route_after_advance.
+    replan_count: Optional[int]
+
 
 def initial_state() -> dict:
     """Return a blank starting state with safe defaults for all optional fields.
@@ -149,4 +155,5 @@ def initial_state() -> dict:
         "flagged_inputs": None,
         "panel_grades": None,
         "supervisor_decisions": None,
+        "replan_count": 0,
     }

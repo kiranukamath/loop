@@ -33,6 +33,13 @@ Phase 13 additions (both flag-gated, default OFF — see build_graph()'s docstri
     _route_after_session → interview_supervisor, one Command-handoff node that
     decides the next specialist (or readiness) at runtime (loop/nodes/supervisor.py).
 
+Phase 15b addition (flag-gated, default OFF, "fixed" orchestration_mode only):
+  - advance_session → _route_after_advance (replaces _route_after_session as the
+    edge function) → "replan" when settings.replan_enabled and the just-finished
+    session's grade diverges from the plan's assumptions, bounded by
+    settings.replan_max_times → replan() re-invokes planner() on the remaining
+    sessions only, then loops back to session_router like a normal "continue".
+
 Run with:  uv run python -m loop.graph
 """
 
@@ -149,6 +156,85 @@ def _route_after_session(state: dict) -> str:
     sessions = plan.get("sessions") or []
     idx = state.get("session_index") or 0
     return "continue" if idx < len(sessions) else "done"
+
+
+# ── Replanning (Phase 15b) ───────────────────────────────────────────────────
+
+
+def _grade_divergence(state: dict) -> bool:
+    """Deterministic divergence check: did the session that just finished score
+    below settings.replan_score_threshold?
+
+    Grades accumulate across the whole run (state["grades"] reducer appends),
+    so the most recently appended grade is the one for the session
+    advance_session just closed out. A real system might average several
+    signals; this is intentionally the simplest check that makes "replan on
+    divergence" demonstrable and offline-testable.
+    """
+    grades = state.get("grades") or []
+    if not grades:
+        return False
+    return grades[-1]["score"] < settings.replan_score_threshold
+
+
+def replan(state: dict) -> dict:
+    """Re-invoke planner() on the remaining sessions after a live-grade divergence.
+
+    Keeps every already-completed session untouched and replaces sessions from
+    session_index onward with a fresh plan (planner() reads the latest
+    weak_areas, so the replan reflects what just went wrong). Renumbers the
+    replacement sessions to continue the existing sequence and caps them at
+    the number of slots that were left, so the plan's total_sessions never
+    grows past what was originally approved.
+
+    Only ever reached via _route_after_advance, which bounds how many times
+    this can run per session (settings.replan_max_times) — this node itself
+    just does the splice and increments the counter.
+    """
+    plan = state.get("plan") or {}
+    sessions = plan.get("sessions") or []
+    idx = state.get("session_index") or 0
+    remaining_slots = len(sessions) - idx
+
+    new_plan = planner(state)["plan"]
+    replacement = list(new_plan.get("sessions") or [])[:remaining_slots]
+    for offset, session in enumerate(replacement):
+        session["session_number"] = idx + offset + 1
+
+    updated_sessions = sessions[:idx] + replacement
+    updated_plan = {**plan, "sessions": updated_sessions, "total_sessions": len(updated_sessions)}
+
+    return {
+        "plan": updated_plan,
+        "replan_count": (state.get("replan_count") or 0) + 1,
+    }
+
+
+def _route_after_advance(state: dict) -> str:
+    """Edge function after advance_session: 'replan', 'continue', or 'done'.
+
+    'replan' only when ALL of: replanning is enabled, there's at least one
+    more session left (replanning after the last session is pointless —
+    readiness runs next regardless), the just-finished session's grade
+    diverges from plan assumptions, and the bound hasn't been hit yet.
+    Otherwise this is byte-for-byte _route_after_session — with
+    replan_enabled left at its default (False) this function always defers
+    to _route_after_session, so the Phase 7a graph is unaffected.
+    """
+    plan = state.get("plan") or {}
+    sessions = plan.get("sessions") or []
+    idx = state.get("session_index") or 0
+    more_sessions = idx < len(sessions)
+
+    if (
+        settings.replan_enabled
+        and more_sessions
+        and _grade_divergence(state)
+        and (state.get("replan_count") or 0) < settings.replan_max_times
+    ):
+        return "replan"
+
+    return _route_after_session(state)
 
 
 # ── Plan approval node (HITL gate 1) ─────────────────────────────────────────
@@ -324,10 +410,16 @@ def build_graph(orchestration_mode: str = "fixed", panel_grading: bool = False) 
     if orchestration_mode == "supervisor":
         graph.add_edge("advance_session", "interview_supervisor")
     else:
+        # Phase 15b: "replan" is only ever returned when settings.replan_enabled
+        # is True — with it left at the default (False), _route_after_advance
+        # always defers to _route_after_session, so this is byte-for-byte the
+        # Phase 7a routing unless a caller has explicitly opted in.
+        graph.add_node("replan", replan)
+        graph.add_edge("replan", "session_router")
         graph.add_conditional_edges(
             "advance_session",
-            _route_after_session,
-            path_map={"continue": "session_router", "done": "readiness"},
+            _route_after_advance,
+            path_map={"replan": "replan", "continue": "session_router", "done": "readiness"},
         )
 
     graph.add_edge("readiness", END)
