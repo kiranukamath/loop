@@ -77,6 +77,20 @@ def stub_embeddings(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def stub_reranker(monkeypatch):
+    """Global offline gate for Phase 14a (reranking): every test uses
+    FakeReranker instead of BedrockRerank.
+
+    retrieve_questions() now calls get_reranker() internally whenever
+    settings.rerank_enabled is True (the default) -- without this fixture,
+    any test exercising retrieval would attempt a live Bedrock rerank call.
+    """
+    from loop.reranker import FakeReranker
+
+    monkeypatch.setattr("loop.retrieval.get_reranker", lambda: FakeReranker())
+
+
+@pytest.fixture(autouse=True)
 def stub_graph_nodes(request, monkeypatch):
     """Auto-stub all model-calling nodes for tests in test_graph.py.
 

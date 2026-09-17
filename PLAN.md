@@ -29,7 +29,7 @@ completes.
 | — | *— v2 "frontier track" begins below (Phases 12+) —* | | | |
 | 12 | MCP & interoperability | interop / Model Context Protocol | ✅ done & approved (12a, 12b) | — |
 | 13 | Multi-agent orchestration | supervisor · parallel (Send) · handoffs | ✅ done & approved (13a, 13b, 13c) | — |
-| 14 | Advanced RAG (Track C) | reranking · CRAG · query rewriting | ⬜ not started (v2) — spec'd | — |
+| 14 | Advanced RAG (Track C) | reranking · CRAG · query rewriting | ✅ done & approved (14a, 14b, 14c) | — |
 | 15 | Self-improvement (Track E) | Reflexion · DSPy · replanning | ⬜ not started (v2) — spec'd | — |
 | 16 | Advanced memory (Track D) | reflection · episodic/semantic/procedural | ⬜ not started (v2) — spec'd | — |
 | 17 | Eval-in-CI (Track H) | regression gate · agent simulation · red-team | ⬜ not started (v2) — spec'd | — |
@@ -1519,6 +1519,67 @@ as server activities.
 
 > Append one entry per completed phase: date, phase, what was built, key decisions, what the
 > owner learned. Keep newest at top.
+
+### Phase 14a+14b+14c — 2026-09-17
+**Built:** `loop/reranker.py` (new) — `get_reranker()` factory mirroring `embeddings.py`:
+`BedrockRerank` (`langchain_aws.document_compressors.rerank`, constructed from a
+`model_arn` built from `rerank_model_id` + `aws_region` — not re-exported from the
+package `__init__`, imported from its submodule) for the live path, `FakeReranker`
+(deterministic word-overlap scoring) for offline/tests. `loop/retrieval.py` — swapped
+`retrieve_questions()`'s internals to dense + BM25 (`rank-bm25`'s `BM25Okapi`, built
+alongside the vector store in `_build_index()`) fused via Reciprocal Rank Fusion
+(`_reciprocal_rank_fusion`, `k=60`, rank-position-only so cosine similarity and BM25's
+unbounded scores never need normalising against each other) → reranked (`get_reranker()`
+on the fused shortlist) → top-k; the public signature is byte-for-byte unchanged, and with
+`hybrid_enabled=False`/`rerank_enabled=False` it's exactly the Phase 8 cosine-only path.
+Added `rewrite_query(focus, topics) -> list[str]` (14b — off/multiquery/HyDE via the
+existing model factory, sharing one `QueryRewrite` schema for both non-off modes) and
+`grade_retrieval(question, focus) -> float` + `crag_search(query, modality, k, focus)`
+(14c — a bounded corrective loop: grade the top hit, re-retrieve with a broadened query up
+to `crag_max_retries` times, then fall back to the Phase 9 `search_web` tool for one final
+grounded retrieval pass). `loop/nodes/interviewers.py::_ask_question` now calls
+`rewrite_query()` then `crag_search()` per query, merging + de-duping candidates by id
+instead of one direct `search_questions()` call. `loop/config.py` —
+`hybrid_enabled`/`rerank_enabled`/`rerank_model_id` (on by default — this is the retrieval
+upgrade itself, not an opt-in), `query_rewrite_mode` (default `"off"`), `crag_enabled`
+(default `False`, adds an LLM call per question pick), `crag_min_relevance`,
+`crag_max_retries`. `loop/schemas.py` — `QueryRewrite`, `RetrievalGrade`. `pyproject.toml`
+— `rank-bm25`. `tests/test_reranker.py`, `tests/test_query_rewrite.py`, `tests/test_crag.py`
+(new) + 12 new tests appended to `tests/test_retrieval.py` — 299/299 total, 0 lint errors.
+
+**Key decisions / lessons:**
+- **Verified before coding (CLAUDE.md rule #7):** `langchain_aws.document_compressors`'s
+  `__init__.py` does not re-export `BedrockRerank` — it must be imported from
+  `langchain_aws.document_compressors.rerank` directly, and it takes a `model_arn` (not a
+  bare `model_id` like `ChatBedrockConverse`/`BedrockEmbeddings`), so `get_reranker()`
+  builds the ARN from `rerank_model_id` + `aws_region`. `BedrockRerank(...)` construction
+  itself makes no network call (only `.rerank()` does), confirmed by constructing one with
+  no AWS credentials present — this is why `get_reranker()` can be exercised structurally
+  in tests without stubbing construction, only the network-touching `.rerank()` call
+  (handled globally by `stub_reranker`, a new autouse `conftest.py` fixture mirroring
+  `stub_embeddings`, since `hybrid_enabled`/`rerank_enabled` default **on**).
+- **Hybrid + rerank default ON, unlike every other Phase 12–13 flag (default off):** those
+  flags gate genuinely optional behaviour; hybrid+rerank *is* the Phase 14a retrieval
+  pipeline, so leaving it off by default would mean the phase shipped disabled. The existing
+  272 Phase 0–13 tests still pass unmodified because the fake embeddings + fake reranker
+  reproduce a stable, deterministic ranking that the old cosine-only assertions still hold
+  under (verified by running the full suite, not assumed).
+- **`query_rewrite_mode` default `"off"` and `crag_enabled` default `False`:** both attach
+  an LLM call per question pick when turned on, changing runtime behaviour/cost — off by
+  default follows the same "flag-gated, byte-identical when off" contract as
+  `panel_grading`/`orchestration_mode="supervisor"` in Phase 13.
+- **CRAG's bound is structural, not a counter that could be miscounted:** `crag_search` is
+  a plain Python `for _ in range(crag_max_retries)` loop plus exactly one grade-check before
+  it and one web-search fallback pass after it — at most `crag_max_retries + 2` calls to
+  `grade_retrieval`/`retrieve_questions` combined, regardless of what the LLM grader
+  returns; a test with a grader stubbed to always return the lowest possible relevance
+  score proves the retry count stays bounded and `search_web` is called exactly once.
+- **`rewrite_query("off")` reconstructs the exact pre-Phase-14 query string** used by
+  `interviewers.py` before this phase, so the default path (single query, `crag_enabled`
+  off) is a byte-for-byte no-op wrapper — confirmed by the full existing test suite passing
+  with zero changes to its assertions.
+
+---
 
 ### Phase 13a+13b+13c — 2026-07-19
 **Built:** `loop/nodes/panel.py` — `grade_dispatch(state) -> list[Send]` (fan-out, one

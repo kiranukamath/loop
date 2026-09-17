@@ -153,6 +153,31 @@ class PersonaGrade(BaseModel):
     notes: str = Field(description="1-2 sentence take on the answer from this persona's lens")
 
 
+# ── Phase 14: Advanced RAG ─────────────────────────────────────────────────────
+
+
+class QueryRewrite(BaseModel):
+    """rewrite_query()'s model output (Phase 14b) -- multiquery/HyDE expansion."""
+
+    queries: list[str] = Field(
+        description=(
+            "Alternate phrasings (multiquery) or a hypothetical matching document's "
+            "text (HyDE) to use as retrieval queries, in addition to the original"
+        )
+    )
+
+
+class RetrievalGrade(BaseModel):
+    """grade_retrieval()'s model output (Phase 14c) -- how well a retrieved
+    question matches the session's focus, used by the CRAG re-retrieve loop."""
+
+    relevance: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="0.0 (irrelevant) to 1.0 (exactly matches the focus)",
+    )
+
+
 class SupervisorDecision(BaseModel):
     """interview_supervisor's model output (Phase 13b) — which specialist runs next.
 

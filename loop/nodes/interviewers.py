@@ -19,7 +19,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
 
 from loop.guardrails import detect_injection, redact_pii
-from loop.tools import get_questions_by_modality, search_questions
+from loop.retrieval import crag_search, rewrite_query
+from loop.tools import get_questions_by_modality
 
 
 def _ask_question(state: dict, modality: str) -> dict:
@@ -38,13 +39,25 @@ def _ask_question(state: dict, modality: str) -> dict:
     """
     focus = state.get("current_focus") or modality
     topics = state.get("current_topics") or []
-    query = f"{focus}. Topics: {', '.join(topics)}" if topics else focus
 
     pool_size = len(get_questions_by_modality(modality))
     if pool_size == 0:
         raise ValueError(f"No questions found for modality: {modality!r}")
 
-    candidates = search_questions(query, modality=modality, k=pool_size)
+    # Phase 14b: query_rewrite_mode="off" (the default) returns exactly one
+    # query -- the same one built pre-Phase-14 -- so this is a no-op then.
+    # Phase 14c: crag_search grades the top hit against `focus` and
+    # re-retrieves (bounded) when it's weak; a no-op wrapper when
+    # crag_enabled is False. Results from every query are merged, de-duped
+    # by id, preserving first-seen order (most relevant query first).
+    queries = rewrite_query(focus, topics)
+    seen_ids: set[str] = set()
+    candidates: list[dict] = []
+    for q in queries:
+        for question in crag_search(q, modality, pool_size, focus):
+            if question["id"] not in seen_ids:
+                seen_ids.add(question["id"])
+                candidates.append(question)
 
     answered_ids = {a["question_id"] for a in (state.get("answers") or [])}
 

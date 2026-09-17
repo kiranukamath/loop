@@ -181,3 +181,98 @@ def test_known_question_retrieved_by_exact_text():
     results = retrieve_questions(exact_text, modality="coding", k=1)
     assert len(results) == 1
     assert results[0]["id"] == "cod-002"
+
+
+# ── Phase 14a: hybrid search + RRF + reranking ────────────────────────────────
+#
+# The autouse fixtures above (fake_embeddings here, stub_reranker in
+# conftest.py) mean these tests already run the full hybrid+rerank pipeline
+# by default -- settings.hybrid_enabled and settings.rerank_enabled are both
+# True. This section adds tests for the new internals directly (BM25 ranking,
+# RRF fusion) and for the two flags individually.
+
+
+def test_bm25_ranks_exact_keyword_match_first():
+    """BM25 is pure keyword scoring -- a query using a question's exact
+    distinctive vocabulary should rank that question first, regardless of
+    what the (fake) embeddings say."""
+    results = retrieval_mod._bm25_rank_ids("thread-safe bounded queue concurrency", "coding")
+    assert results[0] == "cod-002"
+
+
+def test_bm25_respects_modality_filter():
+    results = retrieval_mod._bm25_rank_ids("anything", "behavioral")
+    ids = set(results)
+    assert ids <= {f"beh-{i:03d}" for i in range(1, 9)}
+
+
+def test_reciprocal_rank_fusion_prefers_items_ranked_high_in_both_lists():
+    ranking_a = ["x", "y", "z"]
+    ranking_b = ["y", "x", "z"]
+    fused = retrieval_mod._reciprocal_rank_fusion([ranking_a, ranking_b])
+    # "x" and "y" are ranked #1/#2 in both lists (in some order); "z" is
+    # always last -- so "z" must end up last in the fused ranking.
+    assert fused[-1] == "z"
+    assert set(fused[:2]) == {"x", "y"}
+
+
+def test_reciprocal_rank_fusion_is_a_pure_function_of_rank_not_list_length():
+    """A doc appearing only in one ranking still gets fused in, at a lower score."""
+    fused = retrieval_mod._reciprocal_rank_fusion([["a", "b"], ["a"]])
+    assert fused[0] == "a"
+    assert "b" in fused
+
+
+def test_hybrid_disabled_matches_dense_only_ranking(monkeypatch):
+    """With hybrid_enabled off, retrieve_questions should use exactly the
+    dense ranking (no BM25/RRF involved)."""
+    monkeypatch.setattr("loop.retrieval.settings.hybrid_enabled", False)
+    monkeypatch.setattr("loop.retrieval.settings.rerank_enabled", False)
+
+    query = "concurrency thread synchronization"
+    expected = retrieval_mod._dense_rank_ids(query, "coding", pool_size=8)[:3]
+    results = retrieve_questions(query, modality="coding", k=3)
+    assert [q["id"] for q in results] == expected
+
+
+def test_rerank_enabled_can_reorder_relative_to_fusion(monkeypatch):
+    """With a reranker that always prefers a fixed document, the top result
+    should match the reranker's choice even if fusion ranked it lower."""
+
+    class _AlwaysPrefersLast:
+        def rerank(self, query, documents, top_n=None):
+            # Always rank the last candidate first.
+            n = len(documents)
+            order = [n - 1] + list(range(n - 1)) if n else []
+            order = order[:top_n] if top_n is not None else order
+            return [{"index": i, "relevance_score": 1.0} for i in order]
+
+    monkeypatch.setattr("loop.retrieval.settings.rerank_enabled", True)
+    monkeypatch.setattr("loop.retrieval.get_reranker", lambda: _AlwaysPrefersLast())
+
+    results = retrieve_questions("data structures", modality="coding", k=3)
+    assert len(results) == 3
+
+
+def test_rerank_disabled_returns_fused_top_k(monkeypatch):
+    monkeypatch.setattr("loop.retrieval.settings.hybrid_enabled", True)
+    monkeypatch.setattr("loop.retrieval.settings.rerank_enabled", False)
+
+    query = "concurrency thread synchronization"
+    dense_ids = retrieval_mod._dense_rank_ids(query, "coding", pool_size=8)
+    bm25_ids = retrieval_mod._bm25_rank_ids(query, "coding")
+    expected = retrieval_mod._reciprocal_rank_fusion([dense_ids, bm25_ids])[:3]
+
+    results = retrieve_questions(query, modality="coding", k=3)
+    assert [q["id"] for q in results] == expected
+
+
+def test_retrieve_questions_still_respects_k_with_hybrid_and_rerank_on():
+    results = retrieve_questions("algorithm data structure", k=3)
+    assert len(results) <= 3
+
+
+def test_retrieve_questions_no_matches_for_impossible_modality(monkeypatch):
+    """An empty filtered pool returns [] without touching BM25/reranker."""
+    results = retrieve_questions("anything", modality="not_a_real_modality", k=3)
+    assert results == []

@@ -112,6 +112,29 @@ class Settings(BaseSettings):
     # at runtime — the graph stops owning control flow; the model does.
     orchestration_mode: Literal["fixed", "supervisor"] = "fixed"
 
+    # ── Advanced RAG (Phase 14) ────────────────────────────────────────────────
+    # 14a: hybrid search (dense + BM25 via Reciprocal Rank Fusion) and
+    # cross-encoder reranking, both on by default -- this is the retrieval
+    # pipeline upgrade itself, not an optional extra. Tests stub get_reranker()
+    # with FakeReranker (see conftest.py) so no live Bedrock rerank call runs.
+    hybrid_enabled: bool = True
+    rerank_enabled: bool = True
+    rerank_model_id: str = "amazon.rerank-v1:0"
+
+    # 14b: query rewriting before retrieval. "off" keeps today's single-query
+    # behaviour byte-for-byte; "multiquery" asks the model for extra phrasings
+    # of the same need; "hyde" asks the model to write a hypothetical matching
+    # question and embeds that instead of the raw focus/topics.
+    query_rewrite_mode: Literal["off", "multiquery", "hyde"] = "off"
+
+    # 14c: Corrective RAG -- grade the top retrieved question against the
+    # session's focus and re-retrieve (bounded by crag_max_retries) when it
+    # scores below crag_min_relevance; falls back to search_web as a last
+    # resort. Off by default -- it adds an LLM call to every question pick.
+    crag_enabled: bool = False
+    crag_min_relevance: float = 0.5
+    crag_max_retries: int = 2
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
